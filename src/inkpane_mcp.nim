@@ -1,4 +1,4 @@
-import std/[base64, json, math, os, osproc, sequtils, strutils, unicode]
+import std/[base64, json, math, os, osproc, sequtils, streams, strutils, unicode]
 
 import inkpane/desktop/[dbus, glib, remote]
 
@@ -357,7 +357,7 @@ proc checkReachable(index: int, x, y: float) =
       raise newException(ToolError, "That spot is under Inkpane's toolbar (hidden in your " &
         "screenshots). Ask the user to move the toolbar or hide it with Tab.")
 
-proc pointAt(args: JsonNode): (int, Stream, float, float) =
+proc pointAt(args: JsonNode): (int, CastStream, float, float) =
   ## The monitor's stream and the point on it in logical px, after the checks.
   let (index, m) = pick(args)
   let (x, y) = (number(args, "x", -1) / m.scale, number(args, "y", -1) / m.scale)
@@ -398,34 +398,77 @@ proc scrollTool(args: JsonNode): JsonNode =
   session.scroll(steps)
   reply("Scrolled " & $steps & " notches.")
 
+proc wlCopy(text: string, clear = false): bool =
+  try:
+    let process = startProcess("wl-copy", args = (if clear: @["--clear"] else: @["--type", "text/plain"]),
+      options = {poUsePath})
+    if not clear:
+      process.inputStream.write(text)
+    process.inputStream.close()
+    result = process.waitForExit() == 0
+    process.close()
+  except OSError, IOError:
+    discard
+
+proc pasteText(s, keys: string): bool =
+  ## Types by pasting: KWin's keysym input applies Shift a key late ("3:45" became
+  ## "3;$%"), and which keys need Shift depends on the layout anyway. The user's text
+  ## clipboard is put back afterwards.
+  if findExe("wl-copy").len == 0 or findExe("wl-paste").len == 0:
+    return false
+  let (saved, savedCode) = execCmdEx("wl-paste --no-newline --type text/plain")
+  if not wlCopy(s):
+    return false
+  sleep(80)
+  let codes = keys.split('+').mapIt(evdevCode(it.strip))
+  for code in codes:
+    session.keycode(code, true)
+    sleep(15)
+  for i in countdown(codes.high, 0):
+    session.keycode(codes[i], false)
+    sleep(15)
+  sleep(300)   # let the app read the clipboard before it changes back
+  discard (if savedCode == 0: wlCopy(saved) else: wlCopy("", clear = true))
+  true
+
 proc typeText(args: JsonNode): JsonNode =
   let s = text(args, "text")
   if s.len == 0 or s.runeLen > 2000:
     raise newException(ToolError, "text must be 1 to 2000 characters")
+  # Paste shortcuts differ: Shift+Insert works in most apps, terminals want Ctrl+Shift+V.
+  let keys = text(args, "paste_keys", "shift+insert")
+  if keys notin ["shift+insert", "ctrl+v", "ctrl+shift+v"]:
+    raise newException(ToolError, "paste_keys must be shift+insert, ctrl+v or ctrl+shift+v")
   ensureSession()
-  for rune in s.runes:
-    let sym = keysymFor(rune)
-    session.key(sym, true)
-    session.key(sym, false)
-  reply("Typed " & $s.runeLen & " characters into the focused field.")
+  if pasteText(s, keys):
+    return reply("Pasted " & $s.runeLen & " characters with " & keys & ". Check the " &
+      "screenshot; if nothing appeared, try other paste_keys.")
+  for rune in s.runes:   # no wl-clipboard: key by key, fine for letters, digits and spaces
+    session.typeRune(rune)
+  reply("Typed " & $s.runeLen & " characters into the focused field, key by key: " &
+    "symbols may come out wrong without wl-clipboard; check the screenshot.")
 
 proc pressKeys(args: JsonNode): JsonNode =
-  ## "ctrl+s", "enter", "alt+f4" …: modifiers held while the last key is pressed.
+  ## "ctrl+s", "enter", "alt+f4" …: modifiers held while the last key is pressed, sent as
+  ## physical keys (KWin's keysym input applies modifiers a key late).
   let combo = text(args, "keys")
   let parts = combo.split('+').mapIt(it.strip)
   if parts.len == 0 or parts.anyIt(it.len == 0):
     raise newException(ToolError, "keys must look like ctrl+s or enter")
-  var syms: seq[int]
+  var codes: seq[int]
   for part in parts:
-    let sym = namedKeysym(part)
-    if sym < 0:
-      raise newException(ToolError, "unknown key " & part)
-    syms.add(sym)
+    let code = evdevCode(part)
+    if code < 0:
+      raise newException(ToolError, "unknown key " & part & " (use names like ctrl, shift, " &
+        "alt, enter, tab, esc, up, f5, or a single letter or digit)")
+    codes.add(code)
   ensureSession()
-  for sym in syms:
-    session.key(sym, true)
-  for i in countdown(syms.high, 0):
-    session.key(syms[i], false)
+  for code in codes:
+    session.keycode(code, true)
+    sleep(15)
+  for i in countdown(codes.high, 0):
+    session.keycode(codes[i], false)
+    sleep(15)
   reply("Pressed " & combo & ".")
 
 proc drawTool(args: JsonNode): JsonNode =
@@ -605,8 +648,13 @@ proc inputTools(): JsonNode =
     tool("scroll", "Scroll the mouse wheel at x, y: amount in notches, positive down." & caution,
       schema("", %*{"x": xy, "y": xy, "amount": {"type": "integer"}, "monitor": monitorProp},
         @["x", "y", "amount"])),
-    tool("type_text", "Type text into the focused field (click it first)." & caution,
-      schema("", %*{"text": {"type": "string"}}, @["text"])),
+    tool("type_text", "Type text into the focused field (click it first). It is pasted " &
+      "through the clipboard (the user's clipboard text is put back), with Shift+Insert by " &
+      "default; in a terminal use ctrl+shift+v. If the text doesn't appear, try other " &
+      "paste_keys." & caution,
+      schema("", %*{"text": {"type": "string"},
+        "paste_keys": {"type": "string", "enum": ["shift+insert", "ctrl+v", "ctrl+shift+v"]}},
+        @["text"])),
     tool("press_keys", "Press a key or combination, such as enter, tab, esc, ctrl+s or " &
       "alt+left." & caution, schema("", %*{"keys": {"type": "string"}}, @["keys"]))]
 

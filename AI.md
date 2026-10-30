@@ -91,6 +91,8 @@ clicking = yes
   never types passwords.
 - **Inkpane must be in click-through** for clicks to reach your apps. Clicks that would
   draw, or land on Inkpane's toolbar, are refused.
+- **Typing goes through the clipboard** (install `wl-clipboard`): the text is pasted,
+  so any language and keyboard layout works, and your clipboard is put back afterwards.
 - **Turning it off:** delete the lines (or set `clicking = no`). That takes effect
   immediately.
 - **Asking Claude to set it up** is fine: it shows you the lines and adds them only when

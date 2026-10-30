@@ -1,4 +1,4 @@
-import std/[strutils, unicode]
+import std/[os, strutils, unicode]
 
 import dbus
 import glib
@@ -21,22 +21,15 @@ const
   Monitors = 1'u32
 
   ButtonCodes* = [("left", 0x110'i32), ("right", 0x111'i32), ("middle", 0x112'i32)]   # evdev
-  NamedKeys = [
-    ("enter", 0xff0d), ("return", 0xff0d), ("tab", 0xff09), ("esc", 0xff1b),
-    ("escape", 0xff1b), ("backspace", 0xff08), ("delete", 0xffff), ("space", 0x20),
-    ("up", 0xff52), ("down", 0xff54), ("left", 0xff51), ("right", 0xff53),
-    ("home", 0xff50), ("end", 0xff57), ("pageup", 0xff55), ("pagedown", 0xff56),
-    ("ctrl", 0xffe3), ("shift", 0xffe1), ("alt", 0xffe9), ("super", 0xffeb), ("meta", 0xffeb)]
-  Modifiers* = ["ctrl", "shift", "alt", "super", "meta"]
 
 type
-  Stream* = object
+  CastStream* = object
     node*: uint32
     x*, y*, w*, h*: int   # the monitor it shows, in logical px
 
   RemoteSession* = ref object
     handle: string
-    streams*: seq[Stream]
+    streams*: seq[CastStream]
 
 proc lookupPair(dict: GVariant, key: string): (int, int) =
   let value = g_variant_lookup_value(dict, key.cstring, variantType("(ii)"))
@@ -92,7 +85,7 @@ proc start*(): RemoteSession =
         let props = g_variant_get_child_value(stream, 1)
         let (x, y) = props.lookupPair("position")
         let (w, h) = props.lookupPair("size")
-        result.streams.add(Stream(node: g_variant_get_uint32(node), x: x, y: y, w: w, h: h))
+        result.streams.add(CastStream(node: g_variant_get_uint32(node), x: x, y: y, w: w, h: h))
         for part in [node, props, stream]:
           g_variant_unref(part)
       g_variant_unref(streams)
@@ -109,7 +102,7 @@ proc start*(): RemoteSession =
 proc notify(session: RemoteSession, methodName: string, parameters: GVariant) =
   g_variant_unref(call(PortalBusName, PortalObjectPath, RemoteInterface, methodName, parameters))
 
-proc moveTo*(session: RemoteSession, stream: Stream, x, y: float) =
+proc moveTo*(session: RemoteSession, stream: CastStream, x, y: float) =
   ## x, y in logical px of the stream's monitor.
   session.notify("NotifyPointerMotionAbsolute", g_variant_new("(oa{sv}udd)",
     session.handle.cstring, pointer(nil), stream.node, cdouble(x), cdouble(y)))
@@ -123,6 +116,40 @@ proc scroll*(session: RemoteSession, steps: int) =
   session.notify("NotifyPointerAxisDiscrete", g_variant_new("(oa{sv}ui)", session.handle.cstring,
     pointer(nil), 0'u32, int32(steps)))
 
+proc keycode*(session: RemoteSession, code: int, down: bool) =
+  ## A physical key by its evdev code: no keysym emulation, so modifiers land in order.
+  session.notify("NotifyKeyboardKeycode", g_variant_new("(oa{sv}iu)", session.handle.cstring,
+    pointer(nil), int32(code), uint32(ord(down))))
+
+const
+  EvdevKeys = [
+    ("ctrl", 29), ("shift", 42), ("alt", 56), ("super", 125), ("meta", 125),
+    ("enter", 28), ("return", 28), ("tab", 15), ("esc", 1), ("escape", 1),
+    ("backspace", 14), ("delete", 111), ("insert", 110), ("space", 57), ("up", 103), ("down", 108),
+    ("left", 105), ("right", 106), ("home", 102), ("end", 107), ("pageup", 104),
+    ("pagedown", 109), ("f11", 87), ("f12", 88)]
+  LetterCodes = [30, 48, 46, 32, 18, 33, 34, 35, 23, 36, 37, 38, 50, 49, 24, 25, 16, 19, 31,
+                 20, 22, 47, 17, 45, 21, 44]   # a .. z, by their place on a US keyboard
+
+proc evdevCode*(name: string): int =
+  ## A key name ("ctrl", "enter", "f5", "s", "7") to its evdev code; -1 when unknown.
+  ## Letters are by position, so shortcuts follow QWERTY-like layouts.
+  let lower = name.toLowerAscii
+  for (n, code) in EvdevKeys:
+    if lower == n:
+      return code
+  if lower.len >= 2 and lower[0] == 'f' and lower[1 .. ^1].allCharsInSet(Digits):
+    let n = parseInt(lower[1 .. ^1])
+    if n in 1 .. 10:
+      return 58 + n
+  if lower.len == 1:
+    case lower[0]
+    of 'a' .. 'z': return LetterCodes[ord(lower[0]) - ord('a')]
+    of '1' .. '9': return ord(lower[0]) - ord('1') + 2
+    of '0': return 11
+    else: discard
+  -1
+
 proc key*(session: RemoteSession, keysym: int, down: bool) =
   session.notify("NotifyKeyboardKeysym", g_variant_new("(oa{sv}iu)", session.handle.cstring,
     pointer(nil), int32(keysym), uint32(ord(down))))
@@ -135,16 +162,21 @@ proc keysymFor*(rune: Rune): int =
   of 0x20 .. 0x7e, 0xa0 .. 0xff: int(rune)
   else: 0x01000000 + int(rune)
 
-proc namedKeysym*(name: string): int =
-  ## "enter", "f5", "a", "ctrl" …; -1 when unknown.
-  let lower = name.toLowerAscii
-  for (n, sym) in NamedKeys:
-    if lower == n:
-      return sym
-  if lower.len >= 2 and lower[0] == 'f' and lower[1 .. ^1].allCharsInSet(Digits):
-    let n = parseInt(lower[1 .. ^1])
-    if n in 1 .. 12:
-      return 0xffbe + n - 1
-  if lower.runeLen == 1:
-    return keysymFor(lower.runeAt(0))
-  -1
+proc typeRune*(session: RemoteSession, rune: Rune) =
+  ## One character, paced like a fast typist. Sent back to back, KWin applied the Shift a
+  ## capital or a symbol needs to the next key instead ("Hello, you!" came out as
+  ## "hELLO< YOU1"); a short gap between events keeps them in order. Capitals are typed as
+  ## Shift + the small letter, and Shift is let go after every character in any case.
+  const ShiftL = 0xffe1
+  const GapMs = 15
+  let upper = int(rune) in ord('A') .. ord('Z')
+  let sym = if upper: int(rune) + 32 else: keysymFor(rune)
+  if upper:
+    session.key(ShiftL, true)
+    sleep(GapMs)
+  session.key(sym, true)
+  sleep(GapMs)
+  session.key(sym, false)
+  sleep(GapMs)
+  session.key(ShiftL, false)
+  sleep(GapMs)
