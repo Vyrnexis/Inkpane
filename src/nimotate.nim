@@ -10,7 +10,8 @@ import nimotate/wayland/overlay
 #
 # Runs in the background with a tray icon. Meta+Z (GlobalShortcuts portal), a tray
 # click, or `nimotate --toggle` opens the overlay on every monitor; toggling again or Esc
-# closes it and clears the drawing.
+# closes it and clears the drawing. 1 / V switches to click-through: the drawing stays
+# while apps get the mouse and keyboard, until the toolbar or the toggle brings it back.
 
 const
   Palette = [
@@ -71,6 +72,7 @@ type
     width: float32
     fill: bool           # new rectangles, diamonds and ellipses are filled
     hideToolbar: bool
+    passthrough: bool    # click-through: only the toolbar still takes the pointer
     drawingOn: Overlay   # overlay that owns the drag in progress (drawing or erasing)
     dragTool: Tool       # tool of that drag: the eraser for a right drag
     dragButton: uint8
@@ -95,7 +97,7 @@ proc toolbarHit(app: App, overlay: Overlay): int =
 
 proc toolbarState(app: App, overlay: Overlay): ToolbarState =
   ToolbarState(tool: app.tool, color: Palette.find(app.color), width: app.width,
-    fill: app.fill, hover: app.toolbarHit(overlay))
+    fill: app.fill, passthrough: app.passthrough, hover: app.toolbarHit(overlay))
 
 proc toolbarInTheWay(app: App, overlay: Overlay): bool =
   ## While dragging under or near the toolbar it steps aside, so it never covers a stroke.
@@ -116,7 +118,8 @@ proc redraw(app: App, overlay: Overlay) =
     overlay.toolbar.update(overlay.width, overlay.mesh.pixelSize, app.toolbarState(overlay), Palette)
     renderer.draw(overlay.toolbar)
   let overToolbar = toolbarShown and overlay.pointer in overlay.toolbar.bounds
-  if overlay.pointerInside and not overlay.scene.drawing and not overToolbar:
+  if overlay.pointerInside and not overlay.scene.drawing and not overToolbar and
+      not app.passthrough:
     # Preview of the pen tip (or the eraser): an outline with a dark halo so it shows on
     # both light and dark content.
     let erasing = app.tool == Eraser
@@ -136,8 +139,21 @@ proc follow(app: var App, overlay: Overlay, point: FPoint) =
     discard overlay.scene.moveTo(point, (mods and KMOD_SHIFT) != 0, (mods and KMOD_CTRL) != 0)
   overlay.dirty = true
 
+proc setPassthrough(app: var App, on: bool) =
+  app.passthrough = on
+  for overlay in app.overlays:
+    let clickable = if app.hideToolbar: FRect() else: overlay.toolbar.bounds
+    overlay.setPassthrough(on, clickable)
+  app.markAllDirty()
+
 proc press(app: var App, button: Button) =
+  if button.kind == PassButton:
+    app.setPassthrough(not app.passthrough)
+    return
+  if app.passthrough:   # picking anything else goes back to drawing, as in Excalidraw
+    app.setPassthrough(false)
   case button.kind
+  of PassButton: discard
   of ToolButton: app.tool = ToolOrder[button.index][0]
   of FillButton: app.fill = not app.fill
   of ColorButton: app.color = Palette[button.index]
@@ -153,6 +169,9 @@ proc handleKey(app: var App, event: KeyboardEvent) =
     app.markAllDirty()
     return
   if not (ctrl or shift) and app.drawingOn == nil:
+    if event.scancode == SCANCODE_1 or event.key == SDLK_V:
+      app.setPassthrough(true)
+      return
     for (digit, letter, tool) in ToolKeys:
       if event.scancode == digit or event.key == letter:
         app.tool = tool
@@ -283,13 +302,17 @@ proc hideOverlays(app: var App) =
     overlay.close()
   app.overlays.setLen(0)
   app.drawingOn = nil
+  app.passthrough = false
   setTrayDrawing(false)
 
 proc runCommand(app: var App, command: Command) =
   case command
   of CmdToggle:
-    if app.drawing: app.hideOverlays() else: app.showOverlays()
-  of CmdShow: app.showOverlays()
+    if app.passthrough: app.setPassthrough(false)
+    elif app.drawing: app.hideOverlays()
+    else: app.showOverlays()
+  of CmdShow:
+    if app.passthrough: app.setPassthrough(false) else: app.showOverlays()
   of CmdHide: app.hideOverlays()
   of CmdQuit: app.running = false
   of CmdNone: discard

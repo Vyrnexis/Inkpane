@@ -43,6 +43,7 @@ installed `.desktop` file. `scripts/uninstall-user.sh` removes everything again.
 | Left drag | Draw with the current tool |
 | 2 / R, 3 / D, 4 / O | Rectangle, diamond, ellipse (Shift = square/circle, Ctrl = from centre) |
 | 5 / A, 6 / L | Arrow, line (Shift snaps to 15°) |
+| 1 / V | Click-through: the drawing stays, apps get the mouse and keys; a toolbar click or Meta+Z draws again |
 | 7 / P | Pen (the default) |
 | 9 / H | Highlighter: a straight, see-through bar (Shift snaps to 15°) |
 | 0 / E | Eraser: removes every item it touches |

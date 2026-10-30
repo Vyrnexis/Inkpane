@@ -4,7 +4,8 @@ import sdl3
 
 import render, scene
 
-# Floating strip at the top centre of each monitor: tools, fill, colours, widths.
+# Floating strip at the top centre of each monitor: click-through, tools, fill, colours,
+# widths.
 # Icons and key digits are drawn as lines with the same mesh code as the drawing, so the
 # toolbar needs no font and no image files. The mesh is rebuilt only when what the
 # toolbar shows (tool, colour, width, fill, hovered button) changes.
@@ -34,7 +35,7 @@ const
 
 type
   ButtonKind* = enum
-    ToolButton, FillButton, ColorButton, WidthButton
+    PassButton, ToolButton, FillButton, ColorButton, WidthButton
 
   Button* = object
     kind*: ButtonKind
@@ -46,6 +47,7 @@ type
     color*: int     # palette index, -1 when the colour is not in the palette
     width*: float32
     fill*: bool
+    passthrough*: bool
     hover*: int     # button under the pointer, -1 for none
 
   Toolbar* = object
@@ -80,6 +82,7 @@ proc layout(toolbar: var Toolbar, screenWidth: float32, colors: int) =
   template separate() =
     toolbar.separators.add(x + GroupGap / 2)
     x += GroupGap
+  add(PassButton, 0, ButtonSize)
   for i in 0 .. ToolOrder.high:
     add(ToolButton, i, ButtonSize)
   separate()
@@ -181,7 +184,8 @@ proc addDigit(mesh: var Mesh, digit: int, topLeft: FPoint) =
 
 proc selected(button: Button, state: ToolbarState): bool =
   case button.kind
-  of ToolButton: ToolOrder[button.index][0] == state.tool
+  of PassButton: state.passthrough
+  of ToolButton: not state.passthrough and ToolOrder[button.index][0] == state.tool
   of FillButton: state.fill
   of ColorButton: button.index == state.color
   of WidthButton: abs(WidthPresets[button.index] - state.width) < 0.01
@@ -202,6 +206,12 @@ proc build(toolbar: var Toolbar, state: ToolbarState, palette: openArray[FColor]
       mesh.addFill(back, HoverColor)
     let c = button.rect.center
     case button.kind
+    of PassButton:
+      # Mouse cursor, as Excalidraw's select tool in the same place.
+      mesh.lines(FPoint(x: c.x - 1.5, y: c.y - 1.5),
+        [(-0.45'f32, -0.9'f32), (-0.45, 0.6), (-0.08, 0.22), (0.2, 0.85), (0.42, 0.75),
+         (0.14, 0.12), (0.62, 0.1), (-0.45, -0.9)])
+      mesh.addDigit(1, FPoint(x: c.x + 9.5, y: c.y + 3.5))
     of ToolButton:
       let (tool, digit) = ToolOrder[button.index]
       mesh.addIcon(tool, FPoint(x: c.x - 1.5, y: c.y - 1.5))

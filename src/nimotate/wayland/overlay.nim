@@ -1,3 +1,5 @@
+import std/math
+
 import sdl3
 
 import layershell
@@ -94,6 +96,12 @@ proc updateRenderScale*(overlay: Overlay) =
     let scale = pixelWidth.float32 / overlay.width
     overlay.mesh.setPixelSize(1 / scale)
     discard overlay.renderer.setRenderScale(scale, scale)
+
+proc setPassthrough*(overlay: Overlay, on: bool, clickable: FRect) =
+  ## Click-through: the drawing stays visible, but only `clickable` (logical px, which are
+  ## also surface coordinates) still takes the pointer, and the keyboard goes elsewhere.
+  overlay.layer.setPassthrough(on, int32(clickable.x), int32(clickable.y),
+    int32(ceil(clickable.w)), int32(ceil(clickable.h)))
 
 proc closedByCompositor*(overlay: Overlay): bool =
   overlay.layer.closed

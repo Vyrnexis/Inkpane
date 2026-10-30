@@ -20,10 +20,12 @@ typedef struct NiLayer {
     bool closed;
     uint32_t width;
     uint32_t height;
+    struct wl_surface *surface;
 } NiLayer;
 
 static struct wl_registry *ni_registry;
 static struct zwlr_layer_shell_v1 *ni_layer_shell;
+static struct wl_compositor *ni_compositor;   /* for input regions */
 
 /* ---- registry ---------------------------------------------------------- */
 
@@ -34,6 +36,8 @@ static void ni_registry_global(void *data, struct wl_registry *registry, uint32_
     if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0 && !ni_layer_shell) {
         uint32_t bind_version = version < 4 ? version : 4;
         ni_layer_shell = wl_registry_bind(registry, name, &zwlr_layer_shell_v1_interface, bind_version);
+    } else if (strcmp(interface, wl_compositor_interface.name) == 0 && !ni_compositor) {
+        ni_compositor = wl_registry_bind(registry, name, &wl_compositor_interface, 1);
     }
 }
 
@@ -101,6 +105,7 @@ NiLayer *nimotate_layer_create(struct wl_display *display, struct wl_surface *su
     if (!layer) {
         return NULL;
     }
+    layer->surface = surface;
     layer->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
         ni_layer_shell, surface, output, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, name_space);
 
@@ -122,6 +127,33 @@ NiLayer *nimotate_layer_create(struct wl_display *display, struct wl_surface *su
         }
     }
     return layer;
+}
+
+/*
+ * Click-through: input outside the given rectangle (surface coordinates; zero size for
+ * none) and all keyboard input go to the windows below, while the overlay stays visible.
+ * Off restores the whole surface as input region and exclusive keyboard focus.
+ */
+void nimotate_layer_set_passthrough(NiLayer *layer, int passthrough,
+                                    int32_t x, int32_t y, int32_t width, int32_t height)
+{
+    if (!layer || !layer->layer_surface) {
+        return;
+    }
+    if (passthrough && ni_compositor) {
+        struct wl_region *region = wl_compositor_create_region(ni_compositor);
+        if (width > 0 && height > 0) {
+            wl_region_add(region, x, y, width, height);
+        }
+        wl_surface_set_input_region(layer->surface, region);
+        wl_region_destroy(region);
+    } else {
+        wl_surface_set_input_region(layer->surface, NULL);   /* NULL: the whole surface */
+    }
+    zwlr_layer_surface_v1_set_keyboard_interactivity(layer->layer_surface,
+        passthrough ? ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE
+                    : ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE);
+    wl_surface_commit(layer->surface);
 }
 
 void nimotate_layer_destroy(NiLayer *layer)

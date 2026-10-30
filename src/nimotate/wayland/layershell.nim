@@ -13,6 +13,7 @@ type
     closed*: bool
     width*: uint32
     height*: uint32
+    surface: pointer
 
   LayerHandle* = ptr Layer
 
@@ -20,6 +21,8 @@ proc layerShellInit(display: pointer): cint {.importc: "nimotate_layer_shell_ini
 proc layerCreate(display, surface, output: pointer, nameSpace: cstring,
   exclusiveKeyboard: cint): LayerHandle {.importc: "nimotate_layer_create", cdecl.}
 proc layerDestroy(layer: LayerHandle) {.importc: "nimotate_layer_destroy", cdecl.}
+proc layerSetPassthrough(layer: LayerHandle, passthrough: cint, x, y, width, height: int32)
+  {.importc: "nimotate_layer_set_passthrough", cdecl.}
 proc wl_display_get_fd(display: pointer): cint {.importc, cdecl.}
 
 proc displayFd*(display: pointer): cint =
@@ -34,6 +37,11 @@ proc createOverlayLayer*(display, surface, output: pointer, nameSpace: string,
     exclusiveKeyboard = true): LayerHandle =
   ## Full-screen overlay-layer surface; blocks until the compositor configures it.
   layerCreate(display, surface, output, nameSpace.cstring, cint(exclusiveKeyboard))
+
+proc setPassthrough*(layer: LayerHandle, on: bool, x, y, width, height: int32) =
+  ## Click-through: only the given rectangle (zero size: nothing) still takes the pointer,
+  ## and the keyboard goes to the windows below.
+  layerSetPassthrough(layer, cint(on), x, y, width, height)
 
 proc destroy*(layer: LayerHandle) =
   layerDestroy(layer)
