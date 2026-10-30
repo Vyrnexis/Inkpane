@@ -39,6 +39,11 @@ const
   MaxWidth = 64'f32
   WidthStep = 2'f32
   ToolbarClearance = 24'f32   # a drag this close to the toolbar hides it
+  Boards = [   # background of each board; Transparent shows the desktop
+    FColor(r: 0, g: 0, b: 0, a: 0),
+    FColor(r: 0.98, g: 0.98, b: 0.97, a: 1),
+    FColor(r: 0.13, g: 0.14, b: 0.15, a: 1)
+  ]
 
   ServiceName = "org.vyrnexis.Nimotate"
   ServicePath = "/org/vyrnexis/Nimotate"
@@ -65,6 +70,9 @@ type
     CmdHide = "Hide"
     CmdQuit = "Quit"
 
+  Board = enum
+    Transparent, Whiteboard, Blackboard
+
   App = object
     overlays: seq[Overlay]
     tool: Tool
@@ -73,6 +81,7 @@ type
     fill: bool           # new rectangles, diamonds and ellipses are filled
     hideToolbar: bool
     passthrough: bool    # click-through: only the toolbar still takes the pointer
+    board: Board
     drawingOn: Overlay   # overlay that owns the drag in progress (drawing or erasing)
     dragTool: Tool       # tool of that drag: the eraser for a right drag
     dragButton: uint8
@@ -108,8 +117,10 @@ proc toolbarInTheWay(app: App, overlay: Overlay): bool =
 
 proc redraw(app: App, overlay: Overlay) =
   let renderer = overlay.renderer
-  discard renderer.setRenderDrawColor(0, 0, 0, 0)
+  let background = Boards[ord(app.board)]
+  discard renderer.setRenderDrawColorFloat(background.r, background.g, background.b, background.a)
   discard renderer.renderClear()
+  overlay.mesh.setBackground(background)
   overlay.mesh.update(overlay.scene)
   renderer.draw(overlay.mesh)
   renderer.drawActiveShape(overlay.mesh, overlay.scene)
@@ -124,7 +135,8 @@ proc redraw(app: App, overlay: Overlay) =
     # both light and dark content.
     let erasing = app.tool == Eraser
     let radius = if erasing: EraserRadius else: max(toolWidth(app.tool, app.width) / 2, 2)
-    let color = if erasing: FColor(r: 1, g: 1, b: 1, a: 0.9) else: toolColor(app.tool, app.color)
+    let color = if erasing: FColor(r: 1, g: 1, b: 1, a: 0.9)
+                else: toolColor(app.tool, app.color).onBackground(background)
     renderer.drawRing(overlay.pointer, radius + 1, 3, FColor(r: 0, g: 0, b: 0, a: 0.45))
     renderer.drawRing(overlay.pointer, radius, 1.5, color)
   discard renderer.renderPresent()
@@ -192,6 +204,11 @@ proc handleKey(app: var App, event: KeyboardEvent) =
     if ctrl and target != nil:
       let changed = if shift: target.scene.redo() else: target.scene.undo()
       target.dirty = target.dirty or changed
+  of SDLK_W, SDLK_B:
+    if ctrl:   # Ctrl+W whiteboard, Ctrl+B blackboard; the same key again goes back
+      let board = if event.key == SDLK_W: Whiteboard else: Blackboard
+      app.board = if app.board == board: Transparent else: board
+      app.markAllDirty()
   of SDLK_Y:
     if ctrl and target != nil:
       target.dirty = target.scene.redo() or target.dirty

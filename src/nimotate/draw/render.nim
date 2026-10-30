@@ -25,10 +25,29 @@ type
     item: int       # item being extended (the last one tessellated)
     point: int      # points of that pen item already tessellated
     pixel: float32  # one screen pixel in logical units: the width of the edge fringe
+    background: FColor   # opaque on a whiteboard/blackboard, else transparent
 
 proc clear*(mesh: var Mesh) =
   mesh.vertices.setLen(0)
   mesh.indices.setLen(0)
+
+proc onBackground*(color, background: FColor): FColor =
+  ## Auto-contrast: a colour that would vanish on a board (white on white, black on
+  ## black) is shown in the opposite one. Only the display changes, not the item.
+  result = color
+  if background.a < 1:
+    return
+  let difference = abs(color.r - background.r) + abs(color.g - background.g) + abs(color.b - background.b)
+  if difference < 0.45:
+    let light = background.r + background.g + background.b > 1.5
+    let value = if light: 0.05'f32 else: 1'f32
+    result = FColor(r: value, g: value, b: value, a: color.a)
+
+proc setBackground*(mesh: var Mesh, background: FColor) =
+  ## Called when the board changes; the next update rebuilds the mesh in its colours.
+  if background != mesh.background:
+    mesh.background = background
+    mesh.revision = -1
 
 proc setPixelSize*(mesh: var Mesh, size: float32) =
   ## Called when the monitor's scale changes; the next update rebuilds the mesh.
@@ -122,13 +141,14 @@ proc addFill*(mesh: var Mesh, path: openArray[FPoint], color: FColor) =
     mesh.indices.add([base, a, b, a, a + 1, b, a + 1, b + 1, b])
 
 proc addShape(mesh: var Mesh, item: Item) =
+  let color = item.color.onBackground(mesh.background)
   if item.kind == Highlighter:
-    mesh.addSegment(item.points[0], item.points[1], item.width / 2, item.color)
+    mesh.addSegment(item.points[0], item.points[1], item.width / 2, color)
     return
   for path in item.outline():
     if item.filled:
-      mesh.addFill(path, item.color)
-    mesh.addPath(path, item.width, item.color)
+      mesh.addFill(path, color)
+    mesh.addPath(path, item.width, color)
 
 proc activeShape(scene: Scene): bool =
   scene.drawing and scene.items[^1].kind != Pen
@@ -144,7 +164,7 @@ proc update*(mesh: var Mesh, scene: Scene) =
   while mesh.item < count:
     template item: untyped = scene.items[mesh.item]
     if item.kind == Pen:
-      mesh.addPath(item.points, item.width, item.color, mesh.point)
+      mesh.addPath(item.points, item.width, item.color.onBackground(mesh.background), mesh.point)
       mesh.point = item.points.len
       if scene.drawing and mesh.item == scene.items.high:
         break   # this pen stroke is still growing
@@ -162,7 +182,7 @@ proc draw*(renderer: Renderer, mesh: Mesh) =
 proc drawActiveShape*(renderer: Renderer, cached: Mesh, scene: Scene) =
   ## The shape being dragged, which the cached mesh leaves out until it is finished.
   if scene.activeShape:
-    var mesh = Mesh(pixel: cached.pixel)
+    var mesh = Mesh(pixel: cached.pixel, background: cached.background)
     mesh.addShape(scene.items[^1])
     renderer.draw(mesh)
 

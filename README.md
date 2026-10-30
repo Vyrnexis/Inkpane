@@ -50,6 +50,7 @@ installed `.desktop` file. `scripts/uninstall-user.sh` removes everything again.
 | Right drag | Erase, whatever the tool |
 | F | Fill rectangles, diamonds and ellipses on/off |
 | Tab | Hide/show the toolbar |
+| Ctrl+W / Ctrl+B | Whiteboard / blackboard (same key again: back to the desktop); white or black ink flips to stay visible |
 | Shift+1–8 | Colour (red, orange, yellow, green, blue, purple, white, black) |
 | `[` `]` / wheel | Thinner / thicker |
 | Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y | Undo, redo |
