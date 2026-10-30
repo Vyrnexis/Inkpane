@@ -98,13 +98,13 @@ proc addDisc*(mesh: var Mesh, center: FPoint, radius: float32, color: FColor) =
 proc addSegment*(mesh: var Mesh, a, b: FPoint, radius: float32, color: FColor) =
   let dx = b.x - a.x
   let dy = b.y - a.y
-  let length = sqrt(dx * dx + dy * dy)
-  if length < 0.001:
+  let span = length(dx, dy)
+  if span < 0.001:
     return
   # Unit perpendicular; the quad is solid to half a pixel inside each side and fades out
   # to half a pixel outside. The ends are left hard: paths cover them with discs.
-  let nx = -dy / length
-  let ny = dx / length
+  let nx = -dy / span
+  let ny = dx / span
   let half = mesh.fringe / 2
   let edge = transparent(color)
   let base = cint(mesh.vertices.len)
@@ -118,7 +118,7 @@ proc addSegment*(mesh: var Mesh, a, b: FPoint, radius: float32, color: FColor) =
 
 proc needsJoint(mesh: Mesh, a, b, c: FPoint, radius: float32): bool =
   ## Whether the bend at `b` opens a gap of half a pixel or more on its outer side.
-  var turn = abs(arctan2(c.y - b.y, c.x - b.x) - arctan2(b.y - a.y, b.x - a.x))
+  var turn = abs(angle(c.y - b.y, c.x - b.x) - angle(b.y - a.y, b.x - a.x))
   if turn > PI:
     turn = 2 * PI - turn
   radius * turn > mesh.fringe / 2
@@ -157,8 +157,8 @@ proc addFill*(mesh: var Mesh, path: openArray[FPoint], color: FColor) =
     # Each point pushed one pixel away from the centre gives the fading edge.
     let dx = p.x - center.x
     let dy = p.y - center.y
-    let length = max(hypot(dx, dy), 0.001)
-    let push = mesh.fringe / length
+    let reach = max(length(dx, dy), 0.001)
+    let push = mesh.fringe / reach
     mesh.vertices.add(Vertex(position: p, color: color))
     mesh.vertices.add(Vertex(position: FPoint(x: p.x + dx * push, y: p.y + dy * push), color: edge))
   for i in 0 ..< path.high:

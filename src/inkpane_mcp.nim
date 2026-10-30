@@ -297,7 +297,7 @@ proc callout(args: JsonNode): JsonNode =
   draw(index, m, "rectangle", card, "#ffffff", 1, filled = true)
   draw(index, m, "rectangle", card, accent, 2)
   draw(index, m, "text", [(x + pad, y + pad)], "#1e293b", size, label = lines.join("\n"))
-  if hypot(head[0] - tail[0], head[1] - tail[1]) > 12:
+  if (head[0] - tail[0]) ^ 2 + (head[1] - tail[1]) ^ 2 > 12 * 12:
     draw(index, m, "arrow", [tail, head], accent, DefaultWidth)
   if step > 0:
     draw(index, m, "marker", [(x, y)], accent, 13, label = $step)
@@ -329,7 +329,7 @@ proc drawTool(args: JsonNode): JsonNode =
     # Inkpane, which knows the text's width), to the right of a steep one.
     let ((ax, ay), (bx, by)) = (pts[0], pts[1])
     let (mx, my) = ((ax + bx) / 2, (ay + by) / 2)
-    let length = max(hypot(bx - ax, by - ay), 1)
+    let length = max(sqrt((bx - ax) ^ 2 + (by - ay) ^ 2), 1)   # hypot needs glibc 2.35
     let (dx, dy) = ((bx - ax) / length, (by - ay) / length)
     let at =
       if abs(dx) >= 0.5:

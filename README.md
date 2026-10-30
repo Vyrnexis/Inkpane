@@ -87,6 +87,7 @@ Measured on a release build (x86-64, KDE Plasma):
 | | |
 |---|---|
 | Binary | 247 KB; links only SDL3, libwayland-client and libc |
+| Runs on | Any 64-bit x86 CPU (no AVX needed) with glibc 2.34 or newer |
 | Idle in the background | ~10 MB resident (~1.5 MB of it Inkpane's own), 0 % CPU |
 | Drawing | ~8 µs per pen point; one draw call per monitor per frame |
 | Undo or erase on a busy screen | under 4 ms to rebuild 30 000 points |

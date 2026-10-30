@@ -58,8 +58,17 @@ proc toolNamed*(name: string): Tool =
       return tool
   raise newException(ValueError, "unknown tool: " & name)
 
+# glibc gave hypot (2.35) and the float32 maths functions atan2f, hypotf and sqrtf (2.43)
+# new versions, so a binary calling them won't start on older systems. sqrt and atan2 in
+# float64 are as old as glibc; screen distances never need hypot's overflow care.
+proc length*(dx, dy: float32): float32 =
+  float32(sqrt(float(dx) * float(dx) + float(dy) * float(dy)))
+
+proc angle*(dy, dx: float32): float32 =
+  float32(arctan2(float(dy), float(dx)))
+
 proc distance(a, b: FPoint): float32 =
-  hypot(a.x - b.x, a.y - b.y)
+  length(a.x - b.x, a.y - b.y)
 
 proc toolWidth*(kind: Tool, width: float32): float32 =
   ## The highlighter is a wide marker; every other tool draws at the chosen width.
@@ -79,10 +88,10 @@ proc dragCorners(kind: Tool, anchor, to: FPoint, shift, ctrl: bool): array[2, FP
   var dy = to.y - anchor.y
   if kind in Straight:
     if shift:   # snap the angle, keep the length
-      let angle = round(arctan2(dy, dx) / SnapAngle) * SnapAngle
-      let length = hypot(dx, dy)
-      dx = cos(angle) * length
-      dy = sin(angle) * length
+      let snapped = round(angle(dy, dx) / SnapAngle) * SnapAngle
+      let reach = length(dx, dy)
+      dx = cos(snapped) * reach
+      dy = sin(snapped) * reach
     return [anchor, FPoint(x: anchor.x + dx, y: anchor.y + dy)]
   if shift:     # square, circle, equal-sided diamond
     let side = max(abs(dx), abs(dy))
@@ -105,9 +114,9 @@ proc outline*(item: Item): seq[seq[FPoint]] =
     result = @[@[a, b]]
     if length > 0:
       let head = min(max(item.width * 3, 14), length / 2)
-      let angle = arctan2(b.y - a.y, b.x - a.x)
+      let direction = angle(b.y - a.y, b.x - a.x)
       proc wing(side: float32): FPoint =
-        FPoint(x: b.x - cos(angle + side) * head, y: b.y - sin(angle + side) * head)
+        FPoint(x: b.x - cos(direction + side) * head, y: b.y - sin(direction + side) * head)
       result.add(@[wing(PI / 7), b, wing(-PI / 7)])
   of Rectangle:
     result = @[@[a, FPoint(x: b.x, y: a.y), b, FPoint(x: a.x, y: b.y), a]]
@@ -120,7 +129,7 @@ proc outline*(item: Item): seq[seq[FPoint]] =
     let center = FPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
     let rx = abs(b.x - a.x) / 2
     let ry = abs(b.y - a.y) / 2
-    let segments = clamp(int(hypot(rx, ry) * 0.6), 24, 160)
+    let segments = clamp(int(length(rx, ry) * 0.6), 24, 160)
     var ring: seq[FPoint]
     for i in 0 .. segments:
       let angle = float32(i) / float32(segments) * 2 * PI
