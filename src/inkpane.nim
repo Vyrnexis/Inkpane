@@ -34,11 +34,11 @@ const
     ("Shift / Ctrl while dragging", "Square, snap 15° / from the centre"),
     ("Right drag", "Erase"),
     ("Ctrl+Z, Ctrl+Shift+Z", "Undo, redo"),
-    ("C / Delete", "Clear"),
+    ("C / Delete", "Clear (Ctrl+Z undoes it)"),
     ("Ctrl+W / Ctrl+B", "Whiteboard / blackboard"),
     ("Tab", "Hide the toolbar"),
     ("F1", "This help"),
-    ("Esc", "Close and clear")]
+    ("Esc", "Cancel a drag, else close and clear")]
   Boards = [   # background of each board; Transparent shows the desktop
     FColor(r: 0, g: 0, b: 0, a: 0),
     FColor(r: 0.98, g: 0.98, b: 0.97, a: 1),
@@ -89,6 +89,7 @@ type
     drawingOn: Overlay   # overlay that owns the drag in progress (drawing or erasing)
     dragTool: Tool       # tool of that drag: the eraser for a right drag
     dragButton: uint8
+    erasedTo: FPoint     # where the eraser drag was last, to sweep from there
     typingOn: Overlay    # overlay with text being typed
     help: bool           # F1 cheat sheet shown
     hoverOn: Overlay     # toolbar button under the pointer, for its tooltip
@@ -200,9 +201,12 @@ proc drawTooltip(app: App, overlay: Overlay) =
   let size = measureText(label, TooltipSize)
   let anchor = button.tooltipAnchor
   let x = clamp(anchor.x - size.x / 2 - 8, 4, max(overlay.width - size.x - 20, 4))
-  overlay.renderer.drawBackdrop(FRect(x: x, y: anchor.y + 8, w: size.x + 16, h: size.y + 8),
+  var y = anchor.y + 8
+  if y + size.y + 8 > overlay.height:   # toolbar dragged to the bottom: above it instead
+    y = overlay.toolbar.bounds.y - size.y - 16
+  overlay.renderer.drawBackdrop(FRect(x: x, y: y, w: size.x + 16, h: size.y + 8),
     overlay.mesh.pixelSize)
-  discard overlay.renderer.drawText(overlay.texts, label, FPoint(x: x + 8, y: anchor.y + 12),
+  discard overlay.renderer.drawText(overlay.texts, label, FPoint(x: x + 8, y: y + 4),
     TooltipSize, TextColor, false, overlay.scale)
 
 proc drawTypingHint(overlay: Overlay) =
@@ -294,7 +298,8 @@ proc follow(app: var App, overlay: Overlay, point: FPoint) =
   ## Moves the drag in progress to `point`; Shift and Ctrl shape rectangles, lines etc.
   let mods = getModState()
   if app.dragTool == Eraser:
-    discard overlay.scene.eraseAt(point)
+    discard overlay.scene.eraseAlong(app.erasedTo, point)
+    app.erasedTo = point
   else:
     discard overlay.scene.moveTo(point, (mods and KMOD_SHIFT) != 0, (mods and KMOD_CTRL) != 0)
   overlay.dirty = true
@@ -396,7 +401,11 @@ proc handleKey(app: var App, event: KeyboardEvent) =
         return
   case event.key
   of SDLK_ESCAPE:
-    if app.help:
+    if app.drawingOn != nil:   # drop the shape being dragged, keep drawing
+      app.drawingOn.scene.cancel()
+      app.drawingOn.dirty = true
+      app.drawingOn = nil
+    elif app.help:
       app.help = false
       app.markAllDirty()
     else:
@@ -407,12 +416,16 @@ proc handleKey(app: var App, event: KeyboardEvent) =
       app.markAllDirty()
   of SDLK_F:
     app.fill = not app.fill
+    app.markAllDirty()
   of SDLK_TAB:
     app.hideToolbar = not app.hideToolbar
-  of SDLK_DELETE, SDLK_C:
-    for overlay in app.overlays:
-      overlay.scene.clear()
     app.markAllDirty()
+  of SDLK_DELETE, SDLK_C:
+    if not ctrl:   # Ctrl+C is copy by habit, never a clear
+      for overlay in app.overlays:
+        overlay.scene.clear()
+      app.drawingOn = nil
+      app.markAllDirty()
   of SDLK_Z:
     if ctrl and target != nil:
       let changed = if shift: target.scene.redo() else: target.scene.undo()
@@ -489,6 +502,7 @@ proc handleEvent(app: var App, event: Event) =
       app.dragButton = button
       if app.dragTool == Eraser:
         discard overlay.scene.eraseAt(point)
+        app.erasedTo = point
       else:
         overlay.scene.begin(app.tool, point, app.color, app.width, app.fill)
       app.drawingOn = overlay
@@ -554,6 +568,7 @@ proc hideOverlays(app: var App) =
   app.tooltip = false
   app.help = false
   app.passthrough = false
+  app.board = Transparent   # the next session starts over the desktop again
   setTrayDrawing(false)
 
 proc runCommand(app: var App, command: Command) =
@@ -689,12 +704,12 @@ proc run(): int =
 
   discard setHint(HINT_NO_SIGNAL_HANDLERS, "1")   # GLib handles SIGINT/SIGTERM below
   if not init(INIT_VIDEO):
-    echo "inkpane: SDL init failed: ", getError()
+    notifyError("Could not start: " & $getError())
     return 1
   defer: sdl3.quit()
 
   if $getCurrentVideoDriver() != "wayland":
-    echo "inkpane: needs a Wayland session (SDL video driver is ", getCurrentVideoDriver(), ")"
+    notifyError("Inkpane needs a Wayland session (this one is " & $getCurrentVideoDriver() & ").")
     return 1
 
   let settings = loadSettings()
@@ -706,9 +721,11 @@ proc run(): int =
   startTray(ServiceName, DefaultShortcutHint)
   defer: app.hideOverlays()
 
+  # Before any overlay: the first time, the desktop asks the user to confirm the shortcut,
+  # and a full-screen overlay would cover that dialog while this waits for the answer.
+  app.bindToggleShortcut()
   if command in {CmdShow, CmdToggle}:
     app.showOverlays()
-  app.bindToggleShortcut()
 
   # With no overlay there is no SDL window, and SDL can then only busy-poll for events.
   # So while idle, sleep in GLib instead: D-Bus, the Wayland socket and quit signals wake it.

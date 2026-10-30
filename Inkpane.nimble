@@ -12,7 +12,8 @@ bin           = @["inkpane"]
 # Dependencies
 
 requires "nim >= 2.2.0"
-requires "https://github.com/nim-lang/sdl3"
+# Pinned to the commit packaging/aur/PKGBUILD builds with.
+requires "https://github.com/nim-lang/sdl3#533d22196dab2ea637ea0131171ed3f8db61fe90"
 
 task Release, "Build a small, stripped binary into ./bin":
   mkDir("bin")

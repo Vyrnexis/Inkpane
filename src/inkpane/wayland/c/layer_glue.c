@@ -14,78 +14,78 @@
 #include "../generated/wlr-layer-shell-unstable-v1-client-protocol.h"
 
 /* Mirrored by `Layer` in layershell.nim, which reads the fields directly. */
-typedef struct NiLayer {
+typedef struct InkLayer {
     struct zwlr_layer_surface_v1 *layer_surface;
     bool configured;
     bool closed;
     uint32_t width;
     uint32_t height;
     struct wl_surface *surface;
-} NiLayer;
+} InkLayer;
 
-static struct wl_registry *ni_registry;
-static struct zwlr_layer_shell_v1 *ni_layer_shell;
-static struct wl_compositor *ni_compositor;   /* for input regions */
+static struct wl_registry *ink_registry;
+static struct zwlr_layer_shell_v1 *ink_layer_shell;
+static struct wl_compositor *ink_compositor;   /* for input regions */
 
 /* ---- registry ---------------------------------------------------------- */
 
-static void ni_registry_global(void *data, struct wl_registry *registry, uint32_t name,
+static void ink_registry_global(void *data, struct wl_registry *registry, uint32_t name,
                                const char *interface, uint32_t version)
 {
     (void)data;
-    if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0 && !ni_layer_shell) {
+    if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0 && !ink_layer_shell) {
         uint32_t bind_version = version < 4 ? version : 4;
-        ni_layer_shell = wl_registry_bind(registry, name, &zwlr_layer_shell_v1_interface, bind_version);
-    } else if (strcmp(interface, wl_compositor_interface.name) == 0 && !ni_compositor) {
-        ni_compositor = wl_registry_bind(registry, name, &wl_compositor_interface, 1);
+        ink_layer_shell = wl_registry_bind(registry, name, &zwlr_layer_shell_v1_interface, bind_version);
+    } else if (strcmp(interface, wl_compositor_interface.name) == 0 && !ink_compositor) {
+        ink_compositor = wl_registry_bind(registry, name, &wl_compositor_interface, 1);
     }
 }
 
-static void ni_registry_global_remove(void *data, struct wl_registry *registry, uint32_t name)
+static void ink_registry_global_remove(void *data, struct wl_registry *registry, uint32_t name)
 {
     (void)data;
     (void)registry;
     (void)name;
 }
 
-static const struct wl_registry_listener ni_registry_listener = {
-    .global = ni_registry_global,
-    .global_remove = ni_registry_global_remove,
+static const struct wl_registry_listener ink_registry_listener = {
+    .global = ink_registry_global,
+    .global_remove = ink_registry_global_remove,
 };
 
 int inkpane_layer_shell_init(struct wl_display *display)
 {
-    if (ni_layer_shell) {
+    if (ink_layer_shell) {
         return 1;
     }
-    ni_registry = wl_display_get_registry(display);
-    wl_registry_add_listener(ni_registry, &ni_registry_listener, NULL);
+    ink_registry = wl_display_get_registry(display);
+    wl_registry_add_listener(ink_registry, &ink_registry_listener, NULL);
     wl_display_roundtrip(display);
-    return ni_layer_shell != NULL;
+    return ink_layer_shell != NULL;
 }
 
 /* ---- layer surfaces ---------------------------------------------------- */
 
-static void ni_layer_configure(void *data, struct zwlr_layer_surface_v1 *layer_surface,
+static void ink_layer_configure(void *data, struct zwlr_layer_surface_v1 *layer_surface,
                                uint32_t serial, uint32_t width, uint32_t height)
 {
-    NiLayer *layer = data;
+    InkLayer *layer = data;
     layer->width = width;
     layer->height = height;
     layer->configured = true;
     zwlr_layer_surface_v1_ack_configure(layer_surface, serial);
 }
 
-static void ni_layer_closed(void *data, struct zwlr_layer_surface_v1 *layer_surface)
+static void ink_layer_closed(void *data, struct zwlr_layer_surface_v1 *layer_surface)
 {
-    NiLayer *layer = data;
+    InkLayer *layer = data;
     (void)layer_surface;
     layer->closed = true;
 }
 
-static const struct zwlr_layer_surface_v1_listener ni_layer_listener = {
-    .configure = ni_layer_configure,
-    .closed = ni_layer_closed,
+static const struct zwlr_layer_surface_v1_listener ink_layer_listener = {
+    .configure = ink_layer_configure,
+    .closed = ink_layer_closed,
 };
 
 /*
@@ -93,21 +93,21 @@ static const struct zwlr_layer_surface_v1_listener ni_layer_listener = {
  * (NULL lets the compositor choose). Blocks until the first configure so the
  * caller knows the size before SDL attaches a buffer.
  */
-NiLayer *inkpane_layer_create(struct wl_display *display, struct wl_surface *surface,
+InkLayer *inkpane_layer_create(struct wl_display *display, struct wl_surface *surface,
                              struct wl_output *output, const char *name_space,
                              int exclusive_keyboard)
 {
-    if (!ni_layer_shell || !surface) {
+    if (!ink_layer_shell || !surface) {
         return NULL;
     }
 
-    NiLayer *layer = calloc(1, sizeof(NiLayer));
+    InkLayer *layer = calloc(1, sizeof(InkLayer));
     if (!layer) {
         return NULL;
     }
     layer->surface = surface;
     layer->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
-        ni_layer_shell, surface, output, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, name_space);
+        ink_layer_shell, surface, output, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, name_space);
 
     zwlr_layer_surface_v1_set_anchor(layer->layer_surface,
         ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM |
@@ -117,7 +117,7 @@ NiLayer *inkpane_layer_create(struct wl_display *display, struct wl_surface *sur
     zwlr_layer_surface_v1_set_keyboard_interactivity(layer->layer_surface,
         exclusive_keyboard ? ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE
                            : ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE);
-    zwlr_layer_surface_v1_add_listener(layer->layer_surface, &ni_layer_listener, layer);
+    zwlr_layer_surface_v1_add_listener(layer->layer_surface, &ink_layer_listener, layer);
 
     /* The initial commit must carry no buffer; the compositor answers with configure. */
     wl_surface_commit(surface);
@@ -134,14 +134,14 @@ NiLayer *inkpane_layer_create(struct wl_display *display, struct wl_surface *sur
  * none) and all keyboard input go to the windows below, while the overlay stays visible.
  * Off restores the whole surface as input region and exclusive keyboard focus.
  */
-void inkpane_layer_set_passthrough(NiLayer *layer, int passthrough,
+void inkpane_layer_set_passthrough(InkLayer *layer, int passthrough,
                                     int32_t x, int32_t y, int32_t width, int32_t height)
 {
     if (!layer || !layer->layer_surface) {
         return;
     }
-    if (passthrough && ni_compositor) {
-        struct wl_region *region = wl_compositor_create_region(ni_compositor);
+    if (passthrough && ink_compositor) {
+        struct wl_region *region = wl_compositor_create_region(ink_compositor);
         if (width > 0 && height > 0) {
             wl_region_add(region, x, y, width, height);
         }
@@ -156,7 +156,7 @@ void inkpane_layer_set_passthrough(NiLayer *layer, int passthrough,
     wl_surface_commit(layer->surface);
 }
 
-void inkpane_layer_destroy(NiLayer *layer)
+void inkpane_layer_destroy(InkLayer *layer)
 {
     if (!layer) {
         return;

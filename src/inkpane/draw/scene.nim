@@ -1,4 +1,4 @@
-import std/[math, unicode]
+import std/[math, sequtils, strutils, unicode]
 
 import sdl3
 
@@ -28,10 +28,12 @@ type
     text*: string         # text: what was typed; marker: its number
 
   Change = object
-    ## One undo step. `present` says whether the item is in the scene right now;
-    ## undoing or redoing flips it, moving the item between the scene and the change.
+    ## One undo step: `count` items from `index` on (one drawn or erased item, or all of
+    ## them for a clear). `present` says whether they are in the scene right now; undoing
+    ## or redoing flips it, moving the items between the scene and the change.
     index: int
-    item: Item
+    count: int
+    items: seq[Item]
     present: bool
 
   Scene* = object
@@ -168,11 +170,11 @@ proc finish*(scene: var Scene, at: FPoint, shift = false, ctrl = false) =
   if empty:   # never in the mesh: it was still being drawn
     scene.items.setLen(scene.items.len - 1)
     return
-  scene.undoStack.add(Change(index: scene.items.high, present: true))
+  scene.undoStack.add(Change(index: scene.items.high, count: 1, present: true))
   scene.redoStack.setLen(0)
 
 proc cancel*(scene: var Scene) =
-  ## Drops the item being drawn (Esc while typing).
+  ## Drops the item being drawn (Esc while typing or dragging).
   if scene.drawing:
     scene.items.setLen(scene.items.len - 1)
     scene.drawing = false
@@ -201,18 +203,20 @@ proc setBox*(item: var Item, size: FPoint) =
   item.points = @[item.points[0],
     FPoint(x: item.points[0].x + size.x, y: item.points[0].y + size.y)]
 
-proc markerCount*(scene: Scene): int =
+proc nextMarker(scene: Scene): int =
+  ## One past the highest number on screen: undoing the last marker frees its number
+  ## again, and erasing one in the middle never makes the next a duplicate.
   for item in scene.items:
     if item.kind == Marker:
-      inc result
+      result = max(result, parseInt(item.text))
+  inc result
 
 proc addMarker*(scene: var Scene, center: FPoint, radius: float32, color: FColor) =
-  ## The next step number, so undoing a marker frees its number again.
   scene.items.add(Item(kind: Marker, color: color, width: radius * 2,
-    text: $(scene.markerCount + 1),
+    text: $scene.nextMarker,
     points: @[FPoint(x: center.x - radius, y: center.y - radius),
               FPoint(x: center.x + radius, y: center.y + radius)]))
-  scene.undoStack.add(Change(index: scene.items.high, present: true))
+  scene.undoStack.add(Change(index: scene.items.high, count: 1, present: true))
   scene.redoStack.setLen(0)
 
 ############################
@@ -255,10 +259,10 @@ proc touches(item: Item, p: FPoint): bool =
 proc flip(scene: var Scene, change: var Change) =
   ## Undoes `change` (or redoes it) and turns it into its own inverse.
   if change.present:
-    change.item = move(scene.items[change.index])
-    scene.items.delete(change.index)
+    change.items = scene.items[change.index ..< change.index + change.count]
+    scene.items.delete(change.index ..< change.index + change.count)
   else:
-    scene.items.insert(move(change.item), change.index)
+    scene.items.insert(move(change.items), change.index)
   change.present = not change.present
   inc scene.revision
 
@@ -266,10 +270,18 @@ proc eraseAt*(scene: var Scene, p: FPoint): bool =
   ## Removes every item under the eraser; each removal is its own undo step.
   for i in countdown(scene.items.high, 0):
     if scene.items[i].touches(p):
-      var change = Change(index: i, present: true)
+      var change = Change(index: i, count: 1, present: true)
       scene.flip(change)
       scene.undoStack.add(change)
       scene.redoStack.setLen(0)
+      result = true
+
+proc eraseAlong*(scene: var Scene, a, b: FPoint): bool =
+  ## Erases from `a` to `b`, so a fast swipe catches thin lines between two mouse events.
+  let steps = max(int(ceil(distance(a, b) / EraserRadius)), 1)
+  for i in 1 .. steps:
+    let t = float32(i) / float32(steps)
+    if scene.eraseAt(FPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t)):
       result = true
 
 ############################
@@ -293,8 +305,11 @@ proc redo*(scene: var Scene): bool =
   true
 
 proc clear*(scene: var Scene) =
-  scene.items.setLen(0)
-  scene.undoStack.setLen(0)
+  ## Removes everything as one undo step, so a stray C or Delete costs nothing.
+  scene.cancel()
+  if scene.items.len == 0:
+    return
+  var change = Change(index: 0, count: scene.items.len, present: true)
+  scene.flip(change)
+  scene.undoStack.add(change)
   scene.redoStack.setLen(0)
-  scene.drawing = false
-  inc scene.revision

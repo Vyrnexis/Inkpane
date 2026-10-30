@@ -55,7 +55,8 @@ The first time, KDE asks you to confirm the shortcut. To use another key, change
 System Settings → Shortcuts → Inkpane.
 
 **Esc** closes and clears from drawing mode (in click-through, Esc goes to the app you
-are using, like any other key).
+are using, like any other key). In the middle of a drag, Esc only drops the shape or
+stroke you are drawing.
 
 ## Drawing tools
 
@@ -88,6 +89,7 @@ other. Hold modifiers while dragging (you can press and release them mid-drag):
 | Ctrl | Draw from the centre outwards | — |
 
 A click without dragging draws nothing, so a stray click with a shape tool is harmless.
+Changed your mind halfway through a drag? Press **Esc** before letting go.
 
 **The pen** smooths out the jitter of your hand and mouse without lagging behind. It
 ends exactly where you let go.
@@ -123,8 +125,9 @@ The text size follows the width (`[` `]` or the mouse wheel): the default width 
 so it stays readable over any background.
 
 **Step markers** (N) are filled circles with a number. Each click places the next one:
-1, 2, 3. Undo a marker and its number is free again, so the next click reuses it. Their
-size also follows the width.
+1, 2, 3. Undo a marker and its number is free again, so the next click reuses it; erase
+one from the middle and the next still counts on from the highest. Their size also
+follows the width.
 
 ## Colour, width and fill
 
@@ -146,9 +149,12 @@ size also follows the width.
 | Ctrl+Shift+Z or Ctrl+Y | Redo |
 | Right drag, or the eraser | Remove items |
 | C or Delete | Clear everything, keep drawing |
+| Esc while dragging | Drop the shape being drawn |
 | Esc | Clear everything and close |
 
-Erasing can be undone too: each item the eraser removes is one undo step.
+Erasing and clearing can be undone too: each item the eraser removes is one undo step,
+and Ctrl+Z after a clear brings the whole drawing back. Only closing (Esc, Meta+Z) is
+final.
 
 ## Click-through
 
@@ -177,7 +183,8 @@ so Inkpane cannot hear ordinary keys. Only the global shortcut and the tray reac
 
 Your drawing stays when you switch. White ink on the whiteboard is shown black, and black
 ink on the blackboard is shown white, so nothing disappears; switch back and it has its
-own colour again.
+own colour again. Closing Inkpane puts the board away: the next time starts over your
+desktop.
 
 ## The toolbar
 

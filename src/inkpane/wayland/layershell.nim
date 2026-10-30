@@ -7,7 +7,7 @@
 {.compile: "c/layer_glue.c".}
 
 type
-  Layer* = object         # NiLayer in c/layer_glue.c; updated by the compositor's events
+  Layer* = object         # InkLayer in c/layer_glue.c; updated by the compositor's events
     layerSurface: pointer
     configured*: bool
     closed*: bool
