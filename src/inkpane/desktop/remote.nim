@@ -1,12 +1,13 @@
-import std/[os, strutils, unicode]
+import std/[strutils, unicode]
 
 import dbus
 import glib
 import portal
 
 # Pointer and keyboard input through the desktop's RemoteDesktop portal, for inkpane-mcp
-# when the user has allowed AI clicking. The desktop asks the user once; the restore token
-# it hands back lets later sessions start without asking again, until the user revokes it.
+# when the user has allowed AI clicking. The desktop asks the user for every session (one
+# per inkpane-mcp process, so per AI conversation) and nothing is remembered: an AI that
+# edits the settings file still can't click until a person answers that dialog.
 # Absolute pointer positions need a screen-cast stream per monitor, so the session also
 # selects the monitors; nothing ever reads those streams.
 
@@ -18,7 +19,6 @@ const
   StartTimeoutSeconds = 120   # the user may be reading the permission dialog
   KeyboardAndPointer = 3'u32
   Monitors = 1'u32
-  PersistUntilRevoked = 2'u32
 
   ButtonCodes* = [("left", 0x110'i32), ("right", 0x111'i32), ("middle", 0x112'i32)]   # evdev
   NamedKeys = [
@@ -37,9 +37,6 @@ type
   RemoteSession* = ref object
     handle: string
     streams*: seq[Stream]
-
-proc tokenPath(): string =
-  getEnv("XDG_STATE_HOME", getHomeDir() / ".local" / "state") / "inkpane" / "remote-desktop-token"
 
 proc lookupPair(dict: GVariant, key: string): (int, int) =
   let value = g_variant_lookup_value(dict, key.cstring, variantType("(ii)"))
@@ -71,20 +68,11 @@ proc start*(): RemoteSession =
   result = RemoteSession(handle: $g_variant_get_string(handleValue, nil))
   g_variant_unref(handleValue)
   let handle = result.handle
-  var saved = ""
-  try:
-    saved = readFile(tokenPath()).strip
-  except IOError, OSError:
-    discard
   try:
     g_variant_unref(portalRequest(RemoteInterface, "SelectDevices", StartTimeoutSeconds,
       proc(token: string): GVariant =
         let options = newOptions(token)
         g_variant_builder_add(options, "{sv}", "types".cstring, g_variant_new_uint32(KeyboardAndPointer))
-        g_variant_builder_add(options, "{sv}", "persist_mode".cstring,
-          g_variant_new_uint32(PersistUntilRevoked))
-        if saved.len > 0:
-          options.addString("restore_token", saved)
         g_variant_new("(o@a{sv})", handle.cstring, options.finish())))
     g_variant_unref(portalRequest(CastInterface, "SelectSources", StartTimeoutSeconds,
       proc(token: string): GVariant =
@@ -108,14 +96,6 @@ proc start*(): RemoteSession =
         for part in [node, props, stream]:
           g_variant_unref(part)
       g_variant_unref(streams)
-    let tokenValue = g_variant_lookup_value(started, "restore_token", variantType("s"))
-    if not tokenValue.isNil:
-      try:
-        createDir(tokenPath().parentDir)
-        writeFile(tokenPath(), $g_variant_get_string(tokenValue, nil))
-      except IOError, OSError:
-        discard   # only means asking again next time
-      g_variant_unref(tokenValue)
     if result.streams.len == 0:
       raise newException(PortalError, "The desktop shared no monitor, so pointer positions can't be given.")
   except CatchableError:

@@ -82,8 +82,9 @@ never clicks):
 clicking = yes
 ```
 
-- **The first time**, your desktop asks whether to allow input control, and KDE shows
-  when something is controlling the mouse.
+- **Every new Claude session** that wants to click asks first: your desktop shows its
+  "allow input control" dialog, and nothing is remembered between sessions. KDE also
+  shows when something is controlling the mouse.
 - **Before each action**, Claude says what it is about to do, and it checks a screenshot
   afterwards.
 - **It asks you first** before anything that deletes, pays, sends or installs, and it
@@ -92,6 +93,9 @@ clicking = yes
   draw, or land on Inkpane's toolbar, are refused.
 - **Turning it off:** delete the lines (or set `clicking = no`). That takes effect
   immediately.
+- **Asking Claude to set it up** is fine: it shows you the lines and adds them only when
+  you say so. It never turns clicking on by itself. Either way, it can't click until you
+  answer the desktop's dialog, which it has no way to click itself.
 
 ## Privacy
 
