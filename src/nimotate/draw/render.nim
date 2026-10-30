@@ -5,8 +5,9 @@ import sdl3
 import scene
 
 # Thick, round-jointed lines built from triangles. SDL's renderer only draws 1px lines,
-# so every item becomes a mesh: a quad per segment plus a disc at every point (which
-# also rounds the corners of shapes). Filled shapes add a triangle fan; the highlighter is a
+# so every item becomes a mesh: a quad per segment, a disc at each end, and a disc at
+# every bend sharp enough to leave a visible gap between its two quads (which also
+# rounds the corners of shapes; along a smooth pen line most points need none). Filled shapes add a triangle fan; the highlighter is a
 # single flat-ended quad, so its translucent colour never overlaps itself.
 #
 # Items are only appended while drawing, so the mesh is kept between frames and extended;
@@ -25,6 +26,8 @@ type
     item: int       # item being extended (the last one tessellated)
     point: int      # points of that pen item already tessellated
     pixel: float32  # one screen pixel in logical units: the width of the edge fringe
+    capVertex: int  # where the growing pen line's end cap starts, to replace it
+    capIndex: int
     background: FColor   # opaque on a whiteboard/blackboard, else transparent
 
 proc clear*(mesh: var Mesh) =
@@ -108,14 +111,32 @@ proc addSegment*(mesh: var Mesh, a, b: FPoint, radius: float32, color: FColor) =
     let s = base + cint(strip * 2)
     mesh.indices.add([s, s + 1, s + 2, s + 1, s + 3, s + 2])
 
+proc needsJoint(mesh: Mesh, a, b, c: FPoint, radius: float32): bool =
+  ## Whether the bend at `b` opens a gap of half a pixel or more on its outer side.
+  var turn = abs(arctan2(c.y - b.y, c.x - b.x) - arctan2(b.y - a.y, b.x - a.x))
+  if turn > PI:
+    turn = 2 * PI - turn
+  radius * turn > mesh.fringe / 2
+
 proc addPath*(mesh: var Mesh, path: openArray[FPoint], width: float32, color: FColor,
     first = 0) =
-  ## Tessellates path[first ..], joining it to the point before `first`.
+  ## Tessellates path[first ..]. Continuing a path (first > 0) must follow the call that
+  ## added its earlier points: the end cap left then is replaced, since that end is now
+  ## a bend.
   let radius = width / 2
-  for i in first ..< path.len:
-    mesh.addDisc(path[i], radius, color)
-    if i > 0:
-      mesh.addSegment(path[i - 1], path[i], radius, color)
+  if first > 0:
+    mesh.vertices.setLen(mesh.capVertex)
+    mesh.indices.setLen(mesh.capIndex)
+  elif path.len > 0:
+    mesh.addDisc(path[0], radius, color)   # start cap
+  for i in max(first, 1) .. path.high:
+    if i >= 2 and mesh.needsJoint(path[i - 2], path[i - 1], path[i], radius):
+      mesh.addDisc(path[i - 1], radius, color)
+    mesh.addSegment(path[i - 1], path[i], radius, color)
+  mesh.capVertex = mesh.vertices.len
+  mesh.capIndex = mesh.indices.len
+  if path.len > 1:
+    mesh.addDisc(path[^1], radius, color)  # end cap
 
 proc addFill*(mesh: var Mesh, path: openArray[FPoint], color: FColor) =
   ## Fan from the centre: every fillable shape is convex. The outline is closed, so the
