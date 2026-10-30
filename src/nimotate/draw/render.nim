@@ -6,7 +6,8 @@ import scene
 
 # Thick, round-jointed lines built from triangles. SDL's renderer only draws 1px lines,
 # so every item becomes a mesh: a quad per segment plus a disc at every point (which
-# also rounds the corners of shapes).
+# also rounds the corners of shapes). Filled shapes add a triangle fan; the highlighter is a
+# single flat-ended quad, so its translucent colour never overlaps itself.
 #
 # Items are only appended while drawing, so the mesh is kept between frames and extended;
 # it is rebuilt only when undo, redo, the eraser or clear change the scene's revision.
@@ -61,6 +62,29 @@ proc addPath(mesh: var Mesh, path: openArray[FPoint], first: int, item: Item) =
     if i > 0:
       mesh.addSegment(path[i - 1], path[i], radius, item.color)
 
+proc addFill(mesh: var Mesh, path: openArray[FPoint], color: FColor) =
+  ## Fan from the centre: every fillable shape is convex. The outline is closed, so the
+  ## last point repeats the first and closes the fan.
+  var center: FPoint
+  for p in path:
+    center.x += p.x / float32(path.len)
+    center.y += p.y / float32(path.len)
+  let base = cint(mesh.vertices.len)
+  mesh.vertices.add(Vertex(position: center, color: color))
+  for p in path:
+    mesh.vertices.add(Vertex(position: p, color: color))
+  for i in 1 ..< path.len:
+    mesh.indices.add([base, base + cint(i), base + cint(i) + 1])
+
+proc addShape(mesh: var Mesh, item: Item) =
+  if item.kind == Highlighter:
+    mesh.addSegment(item.points[0], item.points[1], item.width / 2, item.color)
+    return
+  for path in item.outline():
+    if item.filled:
+      mesh.addFill(path, item.color)
+    mesh.addPath(path, 0, item)
+
 proc activeShape(scene: Scene): bool =
   scene.drawing and scene.items[^1].kind != Pen
 
@@ -81,13 +105,13 @@ proc update*(mesh: var Mesh, scene: Scene) =
       if scene.drawing and mesh.item == scene.items.high:
         break   # this pen stroke is still growing
     else:
-      for path in item.outline():
-        mesh.addPath(path, 0, item)
+      mesh.addShape(item)
     inc mesh.item
     mesh.point = 0
 
 proc draw*(renderer: Renderer, mesh: Mesh) =
-  ## Opaque items only: overlapping triangles of a translucent colour would double up.
+  ## Overlapping triangles of a translucent colour would double up, so only the highlighter
+  ## (one quad per item) is translucent.
   if mesh.indices.len > 0:
     discard renderer.renderGeometry(nil, mesh.vertices, mesh.indices)
 
@@ -95,8 +119,7 @@ proc drawActiveShape*(renderer: Renderer, scene: Scene) =
   ## The shape being dragged, which the cached mesh leaves out until it is finished.
   if scene.activeShape:
     var mesh: Mesh
-    for path in scene.items[^1].outline():
-      mesh.addPath(path, 0, scene.items[^1])
+    mesh.addShape(scene.items[^1])
     renderer.draw(mesh)
 
 proc drawRing*(renderer: Renderer, center: FPoint, radius: float32, thickness: float32, color: FColor) =

@@ -11,16 +11,19 @@ const
   SmoothingFactor = 0.35   # 0 = raw input, closer to 1 = smoother but laggier lines
   SnapAngle = PI / 12      # Shift snaps lines and arrows to 15° steps
   EraserRadius* = 8'f32
+  HighlighterAlpha = 0.35'f32
+  HighlighterMinWidth = 16'f32
 
 type
   Tool* = enum
-    Pen, Line, Arrow, Rectangle, Diamond, Ellipse, Eraser
+    Pen, Line, Arrow, Highlighter, Rectangle, Diamond, Ellipse, Eraser
 
   Item* = object
     kind*: Tool           # never Eraser
     color*: FColor
     width*: float32
     points*: seq[FPoint]  # pen: the path; shapes: [start, end] of the drag
+    filled*: bool         # rectangle, diamond, ellipse: solid inside
 
   Change = object
     ## One undo step. `present` says whether the item is in the scene right now;
@@ -38,8 +41,21 @@ type
     anchor: FPoint        # where the drag started
     smoothed: FPoint
 
+const
+  Straight* = {Line, Arrow, Highlighter}
+  Fillable* = {Rectangle, Diamond, Ellipse}
+
 proc distance(a, b: FPoint): float32 =
   hypot(a.x - b.x, a.y - b.y)
+
+proc toolWidth*(kind: Tool, width: float32): float32 =
+  ## The highlighter is a wide marker; every other tool draws at the chosen width.
+  if kind == Highlighter: max(width * 3, HighlighterMinWidth) else: width
+
+proc toolColor*(kind: Tool, color: FColor): FColor =
+  result = color
+  if kind == Highlighter:
+    result.a = HighlighterAlpha
 
 ############################
 # Shapes
@@ -48,7 +64,7 @@ proc distance(a, b: FPoint): float32 =
 proc dragCorners(kind: Tool, anchor, to: FPoint, shift, ctrl: bool): array[2, FPoint] =
   var dx = to.x - anchor.x
   var dy = to.y - anchor.y
-  if kind in {Line, Arrow}:
+  if kind in Straight:
     if shift:   # snap the angle, keep the length
       let angle = round(arctan2(dy, dx) / SnapAngle) * SnapAngle
       let length = hypot(dx, dy)
@@ -67,7 +83,7 @@ proc outline*(item: Item): seq[seq[FPoint]] =
   let a = item.points[0]
   let b = item.points[^1]
   case item.kind
-  of Pen, Eraser, Line:
+  of Pen, Eraser, Line, Highlighter:
     result = @[@[a, b]]
   of Arrow:
     let length = distance(a, b)
@@ -100,8 +116,10 @@ proc outline*(item: Item): seq[seq[FPoint]] =
 # Drawing
 ############################
 
-proc begin*(scene: var Scene, kind: Tool, at: FPoint, color: FColor, width: float32) =
-  scene.items.add(Item(kind: kind, color: color, width: width, points: @[at, at]))
+proc begin*(scene: var Scene, kind: Tool, at: FPoint, color: FColor, width: float32,
+    filled = false) =
+  scene.items.add(Item(kind: kind, color: toolColor(kind, color), width: toolWidth(kind, width),
+    points: @[at, at], filled: filled and kind in Fillable))
   if kind == Pen:
     scene.items[^1].points.setLen(1)
   scene.anchor = at
@@ -162,12 +180,22 @@ proc touches(path: openArray[FPoint], p: FPoint, reach: float32): bool =
     if distanceToSegment(p, path[i - 1], path[i]) <= reach:
       return true
 
+proc inside(path: openArray[FPoint], p: FPoint): bool =
+  ## Even-odd test against a closed outline.
+  var j = path.high
+  for i in 0 .. path.high:
+    let a = path[i]
+    let b = path[j]
+    if (a.y > p.y) != (b.y > p.y) and p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x:
+      result = not result
+    j = i
+
 proc touches(item: Item, p: FPoint): bool =
   let reach = EraserRadius + item.width / 2
   if item.kind == Pen:
     return item.points.touches(p, reach)
   for path in item.outline():
-    if path.touches(p, reach):
+    if path.touches(p, reach) or (item.filled and path.inside(p)):
       return true
 
 proc flip(scene: var Scene, change: var Change) =
