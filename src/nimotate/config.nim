@@ -25,7 +25,8 @@ start = 1
 # Width in logical pixels at start, and the toolbar's three width presets.
 width = 6
 presets = "2 6 14"
-# Tool at start: pen, line, arrow, highlighter, rectangle, diamond, ellipse or eraser.
+# Tool at start: pen, line, arrow, highlighter, rectangle, diamond, ellipse, text,
+# marker or eraser.
 tool = pen
 # Fill rectangles, diamonds and ellipses at start (F toggles it).
 fill = no
