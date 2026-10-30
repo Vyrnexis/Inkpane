@@ -617,7 +617,10 @@ proc updateTooltip(app: var App) =
 proc collectCommands(app: var App) =
   dbus.pump()
   for action in takeTrayActions():
-    pendingCommands.add(if action == TrayQuit: CmdQuit else: CmdToggle)
+    pendingCommands.add(case action
+      of TrayToggle: CmdToggle
+      of TrayStartStop: (if app.drawing: CmdHide else: CmdShow)
+      of TrayQuit: CmdQuit)
   for shortcutId in app.shortcuts.takeActivated():
     if shortcutId == ToggleShortcutId:
       pendingCommands.add(CmdToggle)

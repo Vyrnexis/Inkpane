@@ -109,7 +109,8 @@ const
 
 type
   TrayAction* = enum
-    TrayToggle
+    TrayToggle      # left click: same as the shortcut
+    TrayStartStop   # menu item: does what its label says (Start / Stop Drawing)
     TrayQuit
 
   Tray = object
@@ -242,7 +243,7 @@ proc menuMethod(methodName: string, parameters: GVariant, invocation: pointer) =
     g_variant_unref(data)
     if $eventId == "clicked":
       case id
-      of MenuToggleId: tray.actions.add(TrayToggle)
+      of MenuToggleId: tray.actions.add(TrayStartStop)
       of MenuQuitId: tray.actions.add(TrayQuit)
       else: discard
     reply(invocation)
