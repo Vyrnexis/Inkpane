@@ -1,7 +1,7 @@
 import sdl3
 
 import layershell
-import ../draw/[render, scene]
+import ../draw/[render, scene, toolbar]
 
 # One transparent, full-screen overlay window per monitor. Each SDL window is created
 # without a shell role and then turned into a wlr-layer-shell surface on its output.
@@ -18,6 +18,7 @@ type
     height*: float32
     scene*: Scene
     mesh*: Mesh           # triangles of `scene`, kept between frames
+    toolbar*: Toolbar
     pointer*: FPoint
     pointerInside*: bool
     dirty*: bool
@@ -91,6 +92,7 @@ proc updateRenderScale*(overlay: Overlay) =
   var pixelWidth, pixelHeight: cint
   if overlay.window.getWindowSizeInPixels(pixelWidth, pixelHeight) and overlay.width > 0:
     let scale = pixelWidth.float32 / overlay.width
+    overlay.mesh.setPixelSize(1 / scale)
     discard overlay.renderer.setRenderScale(scale, scale)
 
 proc closedByCompositor*(overlay: Overlay): bool =

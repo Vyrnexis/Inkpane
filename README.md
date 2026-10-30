@@ -4,8 +4,8 @@ Draw on your screen through a transparent Wayland overlay — for tutorials, pre
 and screen recordings. Written in Nim with SDL3 and the wlr-layer-shell protocol.
 
 > Status: **phase 1 in progress.** Runs in the background with a tray icon; toggle the
-> overlay with Meta+Z, a tray click, or `nimotate --toggle`. Pen, shapes, highlighter and eraser
-> work; toolbar and text are planned.
+> overlay with Meta+Z, a tray click, or `nimotate --toggle`. Pen, shapes, highlighter, eraser and
+> toolbar work; text is planned.
 
 ## Requirements
 
@@ -48,6 +48,7 @@ installed `.desktop` file. `scripts/uninstall-user.sh` removes everything again.
 | 0 / E | Eraser: removes every item it touches |
 | Right drag | Erase, whatever the tool |
 | F | Fill rectangles, diamonds and ellipses on/off |
+| Tab | Hide/show the toolbar |
 | Shift+1–8 | Colour (red, orange, yellow, green, blue, purple, white, black) |
 | `[` `]` / wheel | Thinner / thicker |
 | Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y | Undo, redo |

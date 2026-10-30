@@ -3,7 +3,7 @@ import std/[parseopt, posix, tables]
 import sdl3
 
 import nimotate/desktop/[dbus, glib, portal, tray]
-import nimotate/draw/[render, scene]
+import nimotate/draw/[render, scene, toolbar]
 import nimotate/wayland/overlay
 
 # Nimotate: draw on the screen through a transparent Wayland overlay.
@@ -37,6 +37,7 @@ const
   MinWidth = 1'f32
   MaxWidth = 64'f32
   WidthStep = 2'f32
+  ToolbarClearance = 24'f32   # a drag this close to the toolbar hides it
 
   ServiceName = "org.vyrnexis.Nimotate"
   ServicePath = "/org/vyrnexis/Nimotate"
@@ -69,6 +70,7 @@ type
     color: FColor
     width: float32
     fill: bool           # new rectangles, diamonds and ellipses are filled
+    hideToolbar: bool
     drawingOn: Overlay   # overlay that owns the drag in progress (drawing or erasing)
     dragTool: Tool       # tool of that drag: the eraser for a right drag
     dragButton: uint8
@@ -86,14 +88,35 @@ proc markAllDirty(app: var App) =
   for overlay in app.overlays:
     overlay.dirty = true
 
+proc toolbarHit(app: App, overlay: Overlay): int =
+  if app.hideToolbar or not overlay.pointerInside or app.drawingOn != nil:
+    return -1
+  overlay.toolbar.hit(overlay.pointer)
+
+proc toolbarState(app: App, overlay: Overlay): ToolbarState =
+  ToolbarState(tool: app.tool, color: Palette.find(app.color), width: app.width,
+    fill: app.fill, hover: app.toolbarHit(overlay))
+
+proc toolbarInTheWay(app: App, overlay: Overlay): bool =
+  ## While dragging under or near the toolbar it steps aside, so it never covers a stroke.
+  let b = overlay.toolbar.bounds
+  let around = FRect(x: b.x - ToolbarClearance, y: b.y - ToolbarClearance,
+    w: b.w + 2 * ToolbarClearance, h: b.h + 2 * ToolbarClearance)
+  app.drawingOn == overlay and overlay.pointer in around
+
 proc redraw(app: App, overlay: Overlay) =
   let renderer = overlay.renderer
   discard renderer.setRenderDrawColor(0, 0, 0, 0)
   discard renderer.renderClear()
   overlay.mesh.update(overlay.scene)
   renderer.draw(overlay.mesh)
-  renderer.drawActiveShape(overlay.scene)
-  if overlay.pointerInside and not overlay.scene.drawing:
+  renderer.drawActiveShape(overlay.mesh, overlay.scene)
+  let toolbarShown = not app.hideToolbar and not app.toolbarInTheWay(overlay)
+  if toolbarShown:
+    overlay.toolbar.update(overlay.width, overlay.mesh.pixelSize, app.toolbarState(overlay), Palette)
+    renderer.draw(overlay.toolbar)
+  let overToolbar = toolbarShown and overlay.pointer in overlay.toolbar.bounds
+  if overlay.pointerInside and not overlay.scene.drawing and not overToolbar:
     # Preview of the pen tip (or the eraser): an outline with a dark halo so it shows on
     # both light and dark content.
     let erasing = app.tool == Eraser
@@ -112,6 +135,14 @@ proc follow(app: var App, overlay: Overlay, point: FPoint) =
   else:
     discard overlay.scene.moveTo(point, (mods and KMOD_SHIFT) != 0, (mods and KMOD_CTRL) != 0)
   overlay.dirty = true
+
+proc press(app: var App, button: Button) =
+  case button.kind
+  of ToolButton: app.tool = ToolOrder[button.index][0]
+  of FillButton: app.fill = not app.fill
+  of ColorButton: app.color = Palette[button.index]
+  of WidthButton: app.width = WidthPresets[button.index]
+  app.markAllDirty()
 
 proc handleKey(app: var App, event: KeyboardEvent) =
   let ctrl = (event.`mod` and KMOD_CTRL) != 0
@@ -132,6 +163,8 @@ proc handleKey(app: var App, event: KeyboardEvent) =
     pendingCommands.add(CmdHide)
   of SDLK_F:
     app.fill = not app.fill
+  of SDLK_TAB:
+    app.hideToolbar = not app.hideToolbar
   of SDLK_DELETE, SDLK_C:
     for overlay in app.overlays:
       overlay.scene.clear()
@@ -176,6 +209,11 @@ proc handleEvent(app: var App, event: Event) =
     let overlay = app.overlayFor(event.button.windowID)
     let button = event.button.button
     if overlay != nil and app.drawingOn == nil and int(button) in [BUTTON_LEFT, BUTTON_RIGHT]:
+      let pressed = app.toolbarHit(overlay)
+      if pressed >= 0:
+        if int(button) == BUTTON_LEFT:
+          app.press(overlay.toolbar.buttons[pressed])
+        return
       let point = FPoint(x: event.button.x, y: event.button.y)
       app.dragTool = if int(button) == BUTTON_RIGHT: Eraser else: app.tool
       app.dragButton = button
