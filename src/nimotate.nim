@@ -165,9 +165,10 @@ proc drawTexts(overlay: Overlay, background: FColor) =
   for item in overlay.scene.items.mitems:
     case item.kind
     of Text:
-      let size = renderer.drawText(overlay.texts, item.text, item.points[0], item.width,
-        item.color.onBackground(background), true, overlay.scale)
-      item.setBox(size)   # for the eraser
+      let size = if item.text.len == 0: FPoint(x: 0, y: lineHeight(item.width))   # just typing
+                 else: renderer.drawText(overlay.texts, item.text, item.points[0], item.width,
+                   item.color.onBackground(background), true, overlay.scale)
+      item.setBox(size)   # for the eraser and the typing hint
     of Marker:
       let a = item.points[0]
       let b = item.points[1]
@@ -202,6 +203,20 @@ proc drawTooltip(app: App, overlay: Overlay) =
   overlay.renderer.drawBackdrop(FRect(x: x, y: anchor.y + 8, w: size.x + 16, h: size.y + 8),
     overlay.mesh.pixelSize)
   discard overlay.renderer.drawText(overlay.texts, label, FPoint(x: x + 8, y: anchor.y + 12),
+    TooltipSize, TextColor, false, overlay.scale)
+
+proc drawTypingHint(overlay: Overlay) =
+  ## Under the text being typed: how to finish it.
+  const Hint = "Enter  done     Shift+Enter  new line     Esc  cancel"
+  let item = overlay.scene.items[^1]
+  let size = measureText(Hint, TooltipSize)
+  let x = clamp(item.points[0].x, 4, max(overlay.width - size.x - 20, 4))
+  var y = item.points[1].y + 8
+  if y + size.y + 8 > overlay.height:   # no room below: above the text instead
+    y = item.points[0].y - size.y - 16
+  overlay.renderer.drawBackdrop(FRect(x: x, y: y, w: size.x + 16, h: size.y + 8),
+    overlay.mesh.pixelSize)
+  discard overlay.renderer.drawText(overlay.texts, Hint, FPoint(x: x + 8, y: y + 4),
     TooltipSize, TextColor, false, overlay.scale)
 
 proc drawHelp(overlay: Overlay) =
@@ -241,15 +256,32 @@ proc redraw(app: App, overlay: Overlay) =
     renderer.draw(overlay.toolbar)
   let overToolbar = toolbarShown and overlay.pointer in overlay.toolbar.bounds
   if overlay.pointerInside and not overlay.scene.drawing and not overToolbar and
-      not app.passthrough and app.tool notin Placed:
-    # Preview of the pen tip (or the eraser): an outline with a dark halo so it shows on
-    # both light and dark content.
-    let erasing = app.tool == Eraser
-    let radius = if erasing: EraserRadius else: max(toolWidth(app.tool, app.width) / 2, 2)
-    let color = if erasing: FColor(r: 1, g: 1, b: 1, a: 0.9)
+      not app.passthrough:
+    # Preview of what a click or drag makes, at its real size, with a dark halo so it
+    # shows on both light and dark content: the pen tip, the eraser, the marker, or a
+    # text cursor as tall as a line of text.
+    let p = overlay.pointer
+    let color = if app.tool == Eraser: FColor(r: 1, g: 1, b: 1, a: 0.9)
                 else: toolColor(app.tool, app.color).onBackground(background)
-    renderer.drawRing(overlay.pointer, radius + 1, 3, FColor(r: 0, g: 0, b: 0, a: 0.45))
-    renderer.drawRing(overlay.pointer, radius, 1.5, color)
+    if app.tool == Text:
+      let half = lineHeight(textSize(app.width)) / 2
+      let serif = max(half / 4, 3)
+      for (width, ink) in [(4'f32, FColor(r: 0, g: 0, b: 0, a: 0.45)), (1.5'f32, color)]:
+        var beam: Mesh
+        beam.setPixelSize(overlay.mesh.pixelSize)
+        beam.addPath([FPoint(x: p.x, y: p.y - half), FPoint(x: p.x, y: p.y + half)], width, ink)
+        for y in [p.y - half, p.y + half]:
+          beam.addPath([FPoint(x: p.x - serif, y: y), FPoint(x: p.x + serif, y: y)], width, ink)
+        renderer.draw(beam)
+    else:
+      let radius = case app.tool
+        of Eraser: EraserRadius
+        of Marker: markerRadius(app.width)
+        else: max(toolWidth(app.tool, app.width) / 2, 2)
+      renderer.drawRing(p, radius + 1, 3, FColor(r: 0, g: 0, b: 0, a: 0.45))
+      renderer.drawRing(p, radius, 1.5, color)
+  if overlay.scene.editingText:
+    overlay.drawTypingHint()
   if toolbarShown and app.tooltip and app.hoverOn == overlay:
     app.drawTooltip(overlay)
   if app.help:
