@@ -125,16 +125,6 @@ var tray: Tray
 # Variant Helpers
 ############################
 
-proc emptyPixmaps(): GVariant =
-  let builder = g_variant_builder_new(variantType("a(iiay)"))
-  result = g_variant_builder_end(builder)
-  g_variant_builder_unref(builder)
-
-proc emptyArray(signature: static string): GVariant =
-  let builder = g_variant_builder_new(variantType(signature))
-  result = g_variant_builder_end(builder)
-  g_variant_builder_unref(builder)
-
 proc iconThemePath(): string =
   # Installed, icons sit in <prefix>/share/icons next to <prefix>/bin; run from the repo,
   # they are in data/icons next to bin/. The host also searches the normal icon theme paths.
@@ -148,7 +138,7 @@ proc tooltip(): GVariant =
   let description =
     if tray.drawing: "Drawing — " & shortcut & "Esc or click to stop"
     else: "Click" & (if shortcut.len > 0: " or press " & tray.shortcutHint else: "") & " to draw"
-  g_variant_new("(s@a(iiay)ss)", "".cstring, emptyPixmaps(), "Nimotate".cstring, description.cstring)
+  g_variant_new("(sa(iiay)ss)", "".cstring, pointer(nil), "Nimotate".cstring, description.cstring)
 
 ############################
 # StatusNotifierItem
@@ -164,7 +154,7 @@ proc itemProperty(name: string): GVariant =
   of "IconThemePath": g_variant_new_string(iconThemePath().cstring)
   of "OverlayIconName", "AttentionIconName", "AttentionMovieName": g_variant_new_string("")
   of "IconName": g_variant_new_string((if tray.drawing: DrawingIcon else: IdleIcon).cstring)
-  of "IconPixmap", "OverlayIconPixmap", "AttentionIconPixmap": emptyPixmaps()
+  of "IconPixmap", "OverlayIconPixmap", "AttentionIconPixmap": g_variant_new("a(iiay)", pointer(nil))
   of "ToolTip": tooltip()
   of "ItemIsMenu": g_variant_new_boolean(0)
   of "Menu": g_variant_new_object_path(MenuPath)
@@ -183,7 +173,7 @@ proc itemMethod(methodName: string, parameters: GVariant, invocation: pointer) =
 ############################
 
 proc menuItemProperties(id: int32): GVariant =
-  let props = g_variant_builder_new(variantType("a{sv}"))
+  let props = newBuilder("a{sv}")
   proc put(key: string, value: GVariant) =
     g_variant_builder_add(props, "{sv}", key.cstring, value)
   case id
@@ -197,30 +187,27 @@ proc menuItemProperties(id: int32): GVariant =
     put("icon-name", g_variant_new_string("application-exit"))
   else:
     discard
-  result = g_variant_builder_end(props)
-  g_variant_builder_unref(props)
+  props.finish()
 
 proc menuItem(id: int32): GVariant =
-  g_variant_new("(i@a{sv}@av)", id, menuItemProperties(id), emptyArray("av"))
+  g_variant_new("(i@a{sv}av)", id, menuItemProperties(id), pointer(nil))
 
 proc menuLayout(parentId: int32): GVariant =
   if parentId != 0:
     return menuItem(parentId)
-  let rootProps = g_variant_builder_new(variantType("a{sv}"))
+  let rootProps = newBuilder("a{sv}")
   g_variant_builder_add(rootProps, "{sv}", "children-display".cstring, g_variant_new_string("submenu"))
-  let children = g_variant_builder_new(variantType("av"))
+  let children = newBuilder("av")
   for id in MenuIds:
     g_variant_builder_add(children, "v", menuItem(id))
-  result = g_variant_new("(i@a{sv}@av)", 0'i32, g_variant_builder_end(rootProps), g_variant_builder_end(children))
-  g_variant_builder_unref(rootProps)
-  g_variant_builder_unref(children)
+  g_variant_new("(i@a{sv}@av)", 0'i32, rootProps.finish(), children.finish())
 
 proc menuProperty(name: string): GVariant =
   case name
   of "Version": g_variant_new_uint32(3)
   of "TextDirection": g_variant_new_string("ltr")
   of "Status": g_variant_new_string("normal")
-  of "IconThemePath": emptyArray("as")
+  of "IconThemePath": g_variant_new("as", pointer(nil))
   else: nil
 
 proc menuMethod(methodName: string, parameters: GVariant, invocation: pointer) =
@@ -240,11 +227,10 @@ proc menuMethod(methodName: string, parameters: GVariant, invocation: pointer) =
     g_variant_unref(idsValue)
     if ids.len == 0:
       ids = @MenuIds
-    let items = g_variant_builder_new(variantType("a(ia{sv})"))
+    let items = newBuilder("a(ia{sv})")
     for id in ids:
       g_variant_builder_add(items, "(i@a{sv})", id, menuItemProperties(id))
-    reply(invocation, g_variant_new("(@a(ia{sv}))", g_variant_builder_end(items)))
-    g_variant_builder_unref(items)
+    reply(invocation, g_variant_new("(@a(ia{sv}))", items.finish()))
   of "GetProperty":
     reply(invocation, g_variant_new("(v)", g_variant_new_string("")))
   of "Event":
@@ -261,11 +247,11 @@ proc menuMethod(methodName: string, parameters: GVariant, invocation: pointer) =
       else: discard
     reply(invocation)
   of "EventGroup":
-    reply(invocation, g_variant_new("(@ai)", emptyArray("ai")))
+    reply(invocation, g_variant_new("(ai)", pointer(nil)))
   of "AboutToShow":
     reply(invocation, g_variant_new("(b)", cint(0)))
   of "AboutToShowGroup":
-    reply(invocation, g_variant_new("(@ai@ai)", emptyArray("ai"), emptyArray("ai")))
+    reply(invocation, g_variant_new("(aiai)", pointer(nil), pointer(nil)))
   else:
     reply(invocation)
 

@@ -6,19 +6,20 @@
  * All objects use the default event queue, which SDL already dispatches.
  */
 
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <wayland-client.h>
 
 #include "../generated/wlr-layer-shell-unstable-v1-client-protocol.h"
 
+/* Mirrored by `Layer` in layershell.nim, which reads the fields directly. */
 typedef struct NiLayer {
     struct zwlr_layer_surface_v1 *layer_surface;
-    struct wl_surface *surface;
-    int configured;
-    int closed;
-    unsigned int width;
-    unsigned int height;
+    bool configured;
+    bool closed;
+    uint32_t width;
+    uint32_t height;
 } NiLayer;
 
 static struct wl_registry *ni_registry;
@@ -67,7 +68,7 @@ static void ni_layer_configure(void *data, struct zwlr_layer_surface_v1 *layer_s
     NiLayer *layer = data;
     layer->width = width;
     layer->height = height;
-    layer->configured = 1;
+    layer->configured = true;
     zwlr_layer_surface_v1_ack_configure(layer_surface, serial);
 }
 
@@ -75,7 +76,7 @@ static void ni_layer_closed(void *data, struct zwlr_layer_surface_v1 *layer_surf
 {
     NiLayer *layer = data;
     (void)layer_surface;
-    layer->closed = 1;
+    layer->closed = true;
 }
 
 static const struct zwlr_layer_surface_v1_listener ni_layer_listener = {
@@ -100,7 +101,6 @@ NiLayer *nimotate_layer_create(struct wl_display *display, struct wl_surface *su
     if (!layer) {
         return NULL;
     }
-    layer->surface = surface;
     layer->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
         ni_layer_shell, surface, output, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, name_space);
 
@@ -123,11 +123,6 @@ NiLayer *nimotate_layer_create(struct wl_display *display, struct wl_surface *su
     }
     return layer;
 }
-
-int nimotate_layer_configured(NiLayer *layer) { return layer && layer->configured; }
-int nimotate_layer_closed(NiLayer *layer) { return !layer || layer->closed; }
-unsigned int nimotate_layer_width(NiLayer *layer) { return layer ? layer->width : 0; }
-unsigned int nimotate_layer_height(NiLayer *layer) { return layer ? layer->height : 0; }
 
 void nimotate_layer_destroy(NiLayer *layer)
 {

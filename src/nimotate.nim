@@ -1,4 +1,4 @@
-import std/[math, parseopt, posix, strutils, tables, times]
+import std/[parseopt, posix, tables]
 
 import sdl3
 
@@ -45,12 +45,12 @@ const
   DrawingWaitMs = 50'i32   # while drawing, how often D-Bus (tray, shortcut) is serviced
 
 type
-  Command = enum
-    CmdNone
-    CmdToggle
-    CmdShow
-    CmdHide
-    CmdQuit
+  Command = enum            # values are the D-Bus method names of our service
+    CmdNone = ""
+    CmdToggle = "Toggle"
+    CmdShow = "Show"
+    CmdHide = "Hide"
+    CmdQuit = "Quit"
 
   App = object
     overlays: seq[Overlay]
@@ -171,15 +171,10 @@ proc notifyError(message: string) =
   # Desktop notification so errors are visible even though Nimotate has no window.
   stderr.writeLine("nimotate: " & message)
   try:
-    let hints = g_variant_builder_new(variantType("a{sv}"))
-    let actions = g_variant_builder_new(variantType("as"))
     g_variant_unref(call("org.freedesktop.Notifications", "/org/freedesktop/Notifications",
       "org.freedesktop.Notifications", "Notify",
-      g_variant_new("(susss@as@a{sv}i)", "Nimotate".cstring, 0'u32, "org.vyrnexis.Nimotate".cstring,
-        "Nimotate".cstring, message.cstring, g_variant_builder_end(actions),
-        g_variant_builder_end(hints), -1'i32)))
-    g_variant_builder_unref(hints)
-    g_variant_builder_unref(actions)
+      g_variant_new("(susssasa{sv}i)", "Nimotate".cstring, 0'u32, AppId.cstring,
+        "Nimotate".cstring, message.cstring, pointer(nil), pointer(nil), -1'i32)))
   except DBusError:
     discard
 
@@ -218,12 +213,9 @@ proc runCommand(app: var App, command: Command) =
 ############################
 
 proc serviceMethod(methodName: string, parameters: GVariant, invocation: pointer) =
-  case methodName
-  of "Toggle": pendingCommands.add(CmdToggle)
-  of "Show": pendingCommands.add(CmdShow)
-  of "Hide": pendingCommands.add(CmdHide)
-  of "Quit": pendingCommands.add(CmdQuit)
-  else: discard
+  for command in CmdToggle .. CmdQuit:
+    if methodName == $command:
+      pendingCommands.add(command)
   reply(invocation)
 
 proc bindToggleShortcut(app: var App) =
@@ -266,29 +258,14 @@ proc onQuitSignal(data: pointer): cint {.cdecl.} =
   1
 
 proc forwardToRunningInstance(command: Command): int =
-  # Another Nimotate owns the bus name: pass the request on and exit.
-  let methodName =
-    case command
-    of CmdShow: "Show"
-    of CmdHide: "Hide"
-    of CmdQuit: "Quit"
-    else: "Toggle"
+  # Another Nimotate owns the bus name: pass the request on (plain `nimotate` toggles).
+  let methodName = $(if command == CmdNone: CmdToggle else: command)
   try:
     g_variant_unref(call(ServiceName, ServicePath, ServiceInterface, methodName))
     0
   except DBusError:
     stderr.writeLine("nimotate: could not reach the running instance: " & getCurrentExceptionMsg())
     1
-
-proc addDemoStroke(overlay: Overlay) =
-  # --demo: a spiral in the middle of the first monitor, to check rendering without input.
-  let center = FPoint(x: overlay.width / 2, y: overlay.height / 2)
-  overlay.scene.beginStroke(center, Palette[0], 8)
-  for i in 1 .. 400:
-    let angle = float32(i) * 0.06
-    let radius = float32(i) * 0.6
-    discard overlay.scene.extendStroke(FPoint(x: center.x + cos(angle) * radius, y: center.y + sin(angle) * radius))
-  overlay.scene.endStroke(overlay.scene.strokes[^1].points[^1])
 
 proc usage() =
   echo """Usage: nimotate [--toggle | --on | --off | --quit]
@@ -299,14 +276,10 @@ the options control it; plain `nimotate` then toggles drawing.
   --toggle   start or stop drawing
   --on       start drawing
   --off      stop drawing and clear
-  --quit     quit the running instance
-  --demo     (testing) open the overlay with a sample stroke
-  --exit-after=SECONDS  (testing) quit automatically"""
+  --quit     quit the running instance"""
 
 proc run(): int =
   var command = CmdNone
-  var demo = false
-  var exitAfter = 0.0
   for kind, key, value in getopt():
     if kind in {cmdLongOption, cmdShortOption}:
       case key
@@ -314,8 +287,6 @@ proc run(): int =
       of "on": command = CmdShow
       of "off": command = CmdHide
       of "quit": command = CmdQuit
-      of "demo": demo = true
-      of "exit-after": exitAfter = parseFloat(value)
       of "h", "help":
         usage()
         return 0
@@ -348,11 +319,7 @@ proc run(): int =
   startTray(ServiceName, DefaultShortcutHint)
   defer: app.hideOverlays()
 
-  if demo:
-    app.showOverlays()
-    if app.overlays.len > 0:
-      app.overlays[0].addDemoStroke()
-  elif command in {CmdShow, CmdToggle}:
+  if command in {CmdShow, CmdToggle}:
     app.showOverlays()
   app.bindToggleShortcut()
 
@@ -362,11 +329,8 @@ proc run(): int =
   for signal in [SIGINT, SIGTERM]:
     discard g_unix_signal_add(signal, onQuitSignal, nil)
 
-  let startedAt = epochTime()
   var event: Event
   while app.running:
-    if exitAfter > 0 and epochTime() - startedAt >= exitAfter:
-      break
     if app.drawing:
       if waitEventTimeout(event, DrawingWaitMs):
         app.handleEvent(event)

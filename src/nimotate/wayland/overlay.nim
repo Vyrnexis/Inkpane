@@ -64,8 +64,8 @@ proc newOverlay(display: DisplayID): Overlay =
     fail("The compositor refused the overlay surface")
 
   # Custom surfaces get no resize notifications, so tell SDL the configured size.
-  let width = if layer.width > 0: layer.width else: bounds.w.int
-  let height = if layer.height > 0: layer.height else: bounds.h.int
+  let width = if layer.width > 0: int(layer.width) else: int(bounds.w)
+  let height = if layer.height > 0: int(layer.height) else: int(bounds.h)
   discard window.setWindowSize(cint(width), cint(height))
 
   let renderer = createRenderer(window, nil)
@@ -106,7 +106,7 @@ proc close*(overlay: Overlay) =
     overlay.renderer = nil
   if not overlay.layer.isNil:
     overlay.layer.destroy()
-    overlay.layer = LayerHandle(nil)
+    overlay.layer = nil
   if overlay.window != nil:
     destroyWindow(overlay.window)
     overlay.window = nil

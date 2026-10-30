@@ -26,7 +26,10 @@ task Debug, "Build a debug binary into ./bin":
   exec "nim c --out:bin/nimotate src/nimotate.nim"
 
 task Protocols, "Regenerate the Wayland protocol code with wayland-scanner":
+  const dir = "src/nimotate/wayland/"
+  # xdg-shell is only needed for its interface table (layer-shell refers to xdg_popup).
   for name in ["wlr-layer-shell-unstable-v1", "xdg-shell"]:
-    let xml = "src/nimotate/wayland/protocols/" & name & ".xml"
-    exec "wayland-scanner client-header " & xml & " src/nimotate/wayland/generated/" & name & "-client-protocol.h"
-    exec "wayland-scanner private-code " & xml & " src/nimotate/wayland/generated/" & name & "-protocol.c"
+    exec "wayland-scanner private-code " & dir & "protocols/" & name & ".xml " &
+      dir & "generated/" & name & "-protocol.c"
+  exec "wayland-scanner client-header " & dir & "protocols/wlr-layer-shell-unstable-v1.xml " &
+    dir & "generated/wlr-layer-shell-unstable-v1-client-protocol.h"

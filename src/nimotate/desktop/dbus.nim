@@ -24,25 +24,6 @@ var
 # Connection
 ############################
 
-proc callRaw(destination, objectPath, interfaceName, methodName: string,
-    parameters: GVariant, timeoutMs = 30_000): GVariant
-
-proc registerAppId*() =
-  ## Host apps have no sandbox app id; registering one lets portals attribute shortcuts
-  ## and grants to our .desktop file. Must precede any other portal call on the connection.
-  if appIdRegistered:
-    return
-  appIdRegistered = true
-  try:
-    let options = g_variant_builder_new(variantType("a{sv}"))
-    let reply = callRaw("org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop",
-      "org.freedesktop.host.portal.Registry", "Register",
-      g_variant_new("(s@a{sv})", AppId.cstring, g_variant_builder_end(options)))
-    g_variant_builder_unref(options)
-    g_variant_unref(reply)
-  except DBusError:
-    stderr.writeLine("nimotate: could not register app id: " & getCurrentExceptionMsg())
-
 proc bus*(): GDBusConnection =
   if connection != nil:
     return connection
@@ -77,8 +58,9 @@ proc wait*() =
 # Calls and Signals
 ############################
 
-proc callRaw(destination, objectPath, interfaceName, methodName: string,
-    parameters: GVariant, timeoutMs = 30_000): GVariant =
+proc call*(destination, objectPath, interfaceName, methodName: string,
+    parameters: GVariant = nil, timeoutMs = 30_000): GVariant =
+  ## Synchronous method call; the caller must g_variant_unref the reply.
   var error: ptr GError
   result = g_dbus_connection_call_sync(
     bus(), destination.cstring, objectPath.cstring, interfaceName.cstring,
@@ -87,10 +69,18 @@ proc callRaw(destination, objectPath, interfaceName, methodName: string,
   if result.isNil:
     raise newException(DBusError, takeErrorMessage(error, methodName & " failed"))
 
-proc call*(destination, objectPath, interfaceName, methodName: string,
-    parameters: GVariant = nil, timeoutMs = 30_000): GVariant =
-  ## Synchronous method call; the caller must g_variant_unref the reply.
-  callRaw(destination, objectPath, interfaceName, methodName, parameters, timeoutMs)
+proc registerAppId*() =
+  ## Host apps have no sandbox app id; registering one lets portals attribute shortcuts
+  ## and grants to our .desktop file. Must precede any other portal call on the connection.
+  if appIdRegistered:
+    return
+  appIdRegistered = true
+  try:
+    g_variant_unref(call("org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop",
+      "org.freedesktop.host.portal.Registry", "Register",
+      g_variant_new("(sa{sv})", AppId.cstring, pointer(nil))))
+  except DBusError:
+    stderr.writeLine("nimotate: could not register app id: " & getCurrentExceptionMsg())
 
 proc emitSignal*(objectPath, interfaceName, signalName: string, parameters: GVariant = nil) =
   var error: ptr GError

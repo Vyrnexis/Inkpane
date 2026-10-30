@@ -7,7 +7,6 @@
 
 const
   glibLib = "libglib-2.0.so.0"
-  gobjectLib = "libgobject-2.0.so.0"
   gioLib = "libgio-2.0.so.0"
 
   GBusTypeSession* = cint(2)
@@ -28,7 +27,6 @@ type
   GVariant* = pointer
   GVariantBuilder* = pointer
   GDBusConnection* = pointer
-  GUnixFDList* = pointer
 
   GDBusMethodCallback* = proc(
     connection: GDBusConnection,
@@ -72,7 +70,6 @@ proc g_timeout_add_seconds*(interval: cuint, function: GSourceFunc, data: pointe
 proc g_source_remove*(tag: cuint): cint {.cdecl, importc, dynlib: glibLib.}
 proc g_unix_fd_add*(fd: cint, condition: cuint, function: GUnixFDSourceFunc, data: pointer): cuint {.cdecl, importc, dynlib: glibLib.}
 proc g_unix_signal_add*(signum: cint, handler: GSourceFunc, data: pointer): cuint {.cdecl, importc, dynlib: glibLib.}
-proc g_object_unref*(obj: pointer) {.cdecl, importc, dynlib: gobjectLib.}
 
 ############################
 # GVariant
@@ -84,14 +81,12 @@ proc g_variant_new_uint32*(value: uint32): GVariant {.cdecl, importc, dynlib: gl
 proc g_variant_new_boolean*(value: cint): GVariant {.cdecl, importc, dynlib: glibLib.}
 proc g_variant_new_int32*(value: int32): GVariant {.cdecl, importc, dynlib: glibLib.}
 proc g_variant_new_object_path*(value: cstring): GVariant {.cdecl, importc, dynlib: glibLib.}
-proc g_variant_new_variant*(value: GVariant): GVariant {.cdecl, importc, dynlib: glibLib.}
 proc g_variant_get_int32*(value: GVariant): int32 {.cdecl, importc, dynlib: glibLib.}
 proc g_variant_get*(value: GVariant, format: cstring) {.cdecl, importc, dynlib: glibLib, varargs.}
 proc g_variant_get_child_value*(value: GVariant, index: csize_t): GVariant {.cdecl, importc, dynlib: glibLib.}
 proc g_variant_n_children*(value: GVariant): csize_t {.cdecl, importc, dynlib: glibLib.}
 proc g_variant_get_uint32*(value: GVariant): uint32 {.cdecl, importc, dynlib: glibLib.}
 proc g_variant_get_string*(value: GVariant, length: ptr csize_t): cstring {.cdecl, importc, dynlib: glibLib.}
-proc g_variant_get_variant*(value: GVariant): GVariant {.cdecl, importc, dynlib: glibLib.}
 proc g_variant_lookup_value*(dictionary: GVariant, key: cstring, expectedType: pointer): GVariant {.cdecl, importc, dynlib: glibLib.}
 proc g_variant_unref*(value: GVariant) {.cdecl, importc, dynlib: glibLib.}
 proc g_variant_builder_new*(variantType: pointer): GVariantBuilder {.cdecl, importc, dynlib: glibLib.}
@@ -112,11 +107,6 @@ proc g_dbus_connection_call_sync*(connection: GDBusConnection,
   busName, objectPath, interfaceName, methodName: cstring,
   parameters: GVariant, replyType: pointer, flags: cint, timeoutMs: cint,
   cancellable: pointer, error: ptr ptr GError): GVariant {.cdecl, importc, dynlib: gioLib.}
-proc g_dbus_connection_call_with_unix_fd_list_sync*(connection: GDBusConnection,
-  busName, objectPath, interfaceName, methodName: cstring,
-  parameters: GVariant, replyType: pointer, flags: cint, timeoutMs: cint,
-  fdList: GUnixFDList, outFdList: ptr GUnixFDList,
-  cancellable: pointer, error: ptr ptr GError): GVariant {.cdecl, importc, dynlib: gioLib.}
 proc g_dbus_connection_signal_subscribe*(connection: GDBusConnection,
   sender, interfaceName, member, objectPath, arg0: cstring, flags: cint,
   callback: GDBusSignalCallback, userData: pointer, userDataFreeFunc: pointer): cuint {.cdecl, importc, dynlib: gioLib.}
@@ -131,7 +121,6 @@ proc g_dbus_node_info_lookup_interface*(info: pointer, name: cstring): pointer {
 proc g_dbus_method_invocation_return_value*(invocation: pointer, parameters: GVariant) {.cdecl, importc, dynlib: gioLib.}
 proc g_dbus_method_invocation_return_dbus_error*(invocation: pointer,
   errorName, errorMessage: cstring) {.cdecl, importc, dynlib: gioLib.}
-proc g_unix_fd_list_get*(list: GUnixFDList, index: cint, error: ptr ptr GError): cint {.cdecl, importc, dynlib: gioLib.}
 
 ############################
 # Nim Helpers
@@ -148,3 +137,12 @@ proc takeErrorMessage*(error: var ptr GError, fallback: string): string =
 proc variantType*(signature: static string): pointer =
   # G_VARIANT_TYPE() is a plain cast in C; string literals live for the whole program.
   cast[pointer](cstring(signature))
+
+proc newBuilder*(signature: static string): GVariantBuilder =
+  g_variant_builder_new(variantType(signature))
+
+proc finish*(builder: GVariantBuilder): GVariant =
+  ## End and free a builder from newBuilder. (An empty array needs no builder: pass nil
+  ## for it in a g_variant_new format string.)
+  result = g_variant_builder_end(builder)
+  g_variant_builder_unref(builder)

@@ -16,7 +16,6 @@ const
 
 type
   PortalError* = object of IOError
-  PortalCancelled* = object of PortalError
 
   ShortcutBinding* = object
     id*: string
@@ -78,17 +77,13 @@ proc newToken(): string =
   inc tokenCounter
   "nimotate" & $getCurrentProcessId() & "_" & $tokenCounter
 
-proc newOptions(token: string): GVariantBuilder =
-  result = g_variant_builder_new(variantType("a{sv}"))
-  if token.len > 0:
-    g_variant_builder_add(result, "{sv}", "handle_token".cstring, g_variant_new_string(token.cstring))
-
 proc addString(options: GVariantBuilder, key, value: string) =
   g_variant_builder_add(options, "{sv}", key.cstring, g_variant_new_string(value.cstring))
 
-proc finish(options: GVariantBuilder): GVariant =
-  result = g_variant_builder_end(options)
-  g_variant_builder_unref(options)
+proc newOptions(token: string): GVariantBuilder =
+  result = newBuilder("a{sv}")
+  if token.len > 0:
+    result.addString("handle_token", token)
 
 proc portalRequest(methodName: string, buildParameters: proc(token: string): GVariant): GVariant =
   # Returns the a{sv} results of a successful request; the caller must unref them.
@@ -121,7 +116,7 @@ proc portalRequest(methodName: string, buildParameters: proc(token: string): GVa
         of 0: return response.results
         of 1:
           g_variant_unref(response.results)
-          raise newException(PortalCancelled, "The request was cancelled.")
+          raise newException(PortalError, "The request was cancelled.")
         else:
           g_variant_unref(response.results)
           raise newException(PortalError, methodName & " was rejected by the desktop portal.")
@@ -167,7 +162,7 @@ proc bindShortcuts*(bindings: openArray[ShortcutBinding]): ShortcutSession =
   result = ShortcutSession(sessionHandle: sessionHandle)
   try:
     let results = portalRequest("BindShortcuts", proc(token: string): GVariant =
-      let shortcuts = g_variant_builder_new(variantType("a(sa{sv})"))
+      let shortcuts = newBuilder("a(sa{sv})")
       for binding in shortcutList:
         let details = newOptions("")
         details.addString("description", binding.description)
@@ -201,8 +196,3 @@ proc takeActivated*(session: ShortcutSession): seq[string] =
     if activation.session == session.sessionHandle:
       result.add(activation.id)
   activatedShortcuts.setLen(0)
-
-proc close*(session: ShortcutSession) =
-  if session != nil and session.sessionHandle.len > 0:
-    closeSession(session.sessionHandle)
-    session.sessionHandle = ""
