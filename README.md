@@ -4,9 +4,7 @@
 Wayland desktops. Press a key, circle the button, add an arrow and a label, click
 through to show it working, press the key again and it is gone.
 
-<!-- Demo: record per the script, convert with gifski, then uncomment.
-<p align="center"><img src="assets/demo.gif" alt="Nimotate in action" width="800"></p>
--->
+<p align="center"><img src="assets/demo.gif" alt="Nimotate on KDE Plasma annotating AppGlider: a highlight, a label and arrow, clicking through to the Updates page, step markers, an ellipse around Update all, and a pen underline" width="800"></p>
 
 ## Why Nimotate
 
