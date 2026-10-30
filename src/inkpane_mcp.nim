@@ -518,7 +518,7 @@ proc batch(args: JsonNode): JsonNode =
   if board.len > 0:
     discard setBoard(%*{"board": board})
   reply("Drew " & $items.len & " items as one step (undo_last removes them all)" &
-    (if board.len > 0: " on the " & board else: "") & "." &
+    (if board in ["whiteboard", "blackboard"]: " on the " & board else: "") & "." &
     (if notes.len > 0: "\n" & notes.join("\n") else: ""))
 
 proc undoLast(args: JsonNode): JsonNode =
