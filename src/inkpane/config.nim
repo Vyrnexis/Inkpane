@@ -1,8 +1,9 @@
-import std/[os, osproc, parsecfg, streams, strutils]
+import std/[os, strutils]
 
 import sdl3
 
 import draw/scene
+import spawn
 
 # Settings the user edits by hand, in ~/.config/inkpane/inkpane.conf, and what Inkpane
 # remembers by itself (where the toolbar was dragged), in ~/.local/state/inkpane/state.
@@ -80,11 +81,43 @@ proc parseBool(text: string): bool =
   of "no", "false", "off", "0": false
   else: raise newException(ValueError, "expected yes or no: " & text)
 
-proc apply(settings: var Settings, file: Config) =
+type Ini = seq[tuple[section, key, value: string]]
+
+proc parseIni(text: string): Ini =
+  ## "key = value" lines under "[section]" headings; # and ; start comments. A value may
+  ## be in double quotes, so it can hold a # (colours do).
+  var section = ""
+  for raw in text.splitLines:
+    let line = raw.strip
+    if line.len == 0 or line[0] in {'#', ';'}:
+      continue
+    if line[0] == '[':
+      section = line.strip(chars = {'[', ']', ' '})
+      continue
+    let eq = line.find('=')
+    if eq < 0:
+      continue
+    var value = line[eq + 1 .. ^1].strip
+    if value.startsWith('"'):
+      let close = value.find('"', 1)
+      value = if close > 0: value[1 ..< close] else: value[1 .. ^1]
+    else:
+      let comment = value.find(" #")
+      if comment >= 0:
+        value = value[0 ..< comment].strip
+    result.add((section, line[0 ..< eq].strip, value))
+
+proc get(ini: Ini, section, key: string): string =
+  ## The last value for `key` in `section`, or "".
+  for entry in ini:
+    if entry.section == section and entry.key == key:
+      result = entry.value
+
+proc apply(settings: var Settings, file: Ini) =
   ## Copies every valid value from `file`; a bad one is reported and the current value kept.
   template read(section, key: string, body: untyped) =
     block:
-      let raw {.inject.} = file.getSectionValue(section, key)
+      let raw {.inject.} = file.get(section, key)
       if raw.len > 0:
         try:
           body
@@ -122,7 +155,7 @@ proc apply(settings: var Settings, file: Config) =
 
 proc loadSettings*(): Settings =
   ## Defaults, then the user's file; writes the documented defaults if there is none.
-  result.apply(loadConfig(newStringStream(DefaultConfig)))
+  result.apply(parseIni(DefaultConfig))
   let path = configPath()
   if not fileExists(path):
     try:
@@ -132,20 +165,17 @@ proc loadSettings*(): Settings =
       warn("could not write the default settings: " & getCurrentExceptionMsg())
     return
   try:
-    result.apply(loadConfig(path))
-  except IOError, OSError, ValueError:
+    result.apply(parseIni(readFile(path)))
+  except IOError, OSError:
     warn(getCurrentExceptionMsg())
 
 proc findFont*(settings: Settings): string =
   ## The configured font, or fontconfig's default sans-serif; empty when there is none.
   if settings.font.len > 0:
     return settings.font
-  try:
-    result = execProcess("fc-match", args = ["-f", "%{file}", "sans-serif"],
-      options = {poUsePath}).strip
-  except OSError:
-    return ""
-  if not fileExists(result):
+  let (code, file) = run(["fc-match", "-f", "%{file}", "sans-serif"], output = true)
+  result = file.strip
+  if code != 0 or not fileExists(result):
     result = ""
 
 ############################
@@ -155,7 +185,7 @@ proc findFont*(settings: Settings): string =
 proc loadToolbarPlace*(): FPoint =
   ## How far the toolbar was dragged from its default spot (top centre); (0, 0) if never.
   try:
-    let words = loadConfig(statePath()).getSectionValue("", "toolbar").splitWhitespace
+    let words = parseIni(readFile(statePath())).get("", "toolbar").splitWhitespace
     if words.len == 2:
       result = FPoint(x: parseFloat(words[0]), y: parseFloat(words[1]))
   except IOError, OSError, ValueError:

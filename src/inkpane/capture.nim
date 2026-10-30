@@ -1,4 +1,6 @@
-import std/[dynlib, os, osproc, posix, streams, strutils]
+import std/[dynlib, os, posix, strutils]
+
+import spawn
 
 import sdl3
 
@@ -168,15 +170,7 @@ proc copyToClipboard*(path: string): bool =
     clipboardPng = readFile(path)
   except IOError:
     return false
-  if findExe("wl-copy").len > 0:
-    try:
-      let process = startProcess("wl-copy", args = ["--type", "image/png"], options = {poUsePath})
-      process.inputStream.write(clipboardPng)
-      process.inputStream.close()
-      let ok = process.waitForExit() == 0   # it serves pastes from a forked copy of itself
-      process.close()
-      if ok:
-        return true
-    except OSError, IOError:
-      discard
+  # wl-copy serves pastes from a forked copy of itself, so this returns at once.
+  if findExe("wl-copy").len > 0 and run(["wl-copy", "--type", "image/png"], clipboardPng).code == 0:
+    return true
   setClipboardData(serveClipboard, nil, nil, ["image/png".cstring])

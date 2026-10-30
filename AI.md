@@ -124,7 +124,7 @@ the latest screenshot of a monitor, origin top-left.
 | `undo_last`, `clear`, `set_board`, `close` | Remove marks, show a board, close |
 | `click`, `scroll`, `type_text`, `press_keys` | Only with `[ai] clicking = yes` |
 
-Size: `inkpane-mcp` is about 255 KB, with no SDL. It talks to the running Inkpane over
+Size: `inkpane-mcp` is about 225 KB, with no SDL. It talks to the running Inkpane over
 D-Bus.
 
 ## Troubleshooting

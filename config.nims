@@ -5,3 +5,8 @@
 if projectName() != "inkpane_mcp":
   switch("dynlibOverride", "SDL3")
   switch("passL", "-lSDL3")
+
+# Smaller binaries: the C library's allocator, and bugs (Defects) end the program at once
+# instead of unwinding. Inkpane only ever catches ordinary errors (CatchableError).
+switch("define", "useMalloc")
+switch("panics", "on")

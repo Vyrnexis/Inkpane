@@ -8,7 +8,7 @@ through to show it working, press the key again and it is gone.
 
 ## Why Inkpane
 
-- **Small and fast.** A 285 KB program that waits in the tray at about 10 MB of memory
+- **Small and fast.** A 247 KB program that waits in the tray at about 10 MB of memory
   and no CPU. Drawing is one cached mesh per monitor, anti-aliased, at full refresh rate.
 - **The tools people actually use.** Pen, rectangle, diamond, ellipse, arrow, line,
   highlighter, text, numbered step markers and an eraser, with a whiteboard and
@@ -86,7 +86,7 @@ Measured on a release build (x86-64, KDE Plasma):
 
 | | |
 |---|---|
-| Binary | 285 KB; links only SDL3, libwayland-client and libc |
+| Binary | 247 KB; links only SDL3, libwayland-client and libc |
 | Idle in the background | ~10 MB resident (~1.5 MB of it Inkpane's own), 0 % CPU |
 | Drawing | ~8 µs per pen point; one draw call per monitor per frame |
 | Undo or erase on a busy screen | under 4 ms to rebuild 30 000 points |
