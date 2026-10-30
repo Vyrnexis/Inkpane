@@ -58,10 +58,26 @@ scripting and troubleshooting.
 
 ## Install
 
-**Arch Linux:** build the package in [`packaging/aur`](packaging/aur/PKGBUILD) with
-`makepkg -sir`. Pacman's `nim` is only needed to build, and `-r` removes it again
-afterwards. If you use choosenim, your own Nim is not touched; to build with it
-instead, run `makepkg -si --nodeps`.
+**Arch Linux (AUR):** the [`inkpane-git`](https://aur.archlinux.org/packages/inkpane-git)
+package builds the latest version:
+
+```bash
+yay -S inkpane-git             # or paru, or any AUR helper
+```
+
+**Any other distribution:** download `inkpane-<version>-x86_64-linux.tar.gz` from the
+[releases page](https://github.com/Vyrnexis/Inkpane/releases), then:
+
+```bash
+tar xf inkpane-*-x86_64-linux.tar.gz
+cd inkpane-*/
+scripts/install-user.sh        # or: scripts/install-user.sh --autostart
+inkpane &
+```
+
+The binaries run on any 64-bit x86 Linux with glibc 2.34 or newer. They use your
+distribution's SDL3, which recent releases package (for example Debian 13, Ubuntu 25.04
+and Fedora 42); install it and the other [requirements](#requirements) first.
 
 **From source** (needs Nim 2.2+):
 
@@ -71,6 +87,9 @@ nimble Release
 scripts/install-user.sh        # or: scripts/install-user.sh --autostart
 inkpane &
 ```
+
+With choosenim's Nim on Arch, you can also build the package in
+[`packaging/aur`](packaging/aur/PKGBUILD) with `makepkg -si --nodeps`.
 
 This installs `inkpane` (and the optional `inkpane-mcp`, see below). Installing matters: the
 desktop only grants the Meta+Z shortcut to apps with an installed `.desktop` file.
