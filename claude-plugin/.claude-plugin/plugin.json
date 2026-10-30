@@ -1,7 +1,7 @@
 {
   "name": "inkpane",
   "description": "Draw on the user's real screen with Inkpane to teach and explain: point at controls, number the steps, sketch diagrams on a whiteboard, and take screenshots to check.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": {
     "name": "Vyrnexis",
     "url": "https://github.com/Vyrnexis"

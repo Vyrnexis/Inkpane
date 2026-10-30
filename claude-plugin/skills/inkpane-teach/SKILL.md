@@ -58,7 +58,7 @@ When the task is done: `clear`, sum up in a sentence or two, and offer to repeat
 - **Highlighter**: a straight bar over one line of text ("read this line"). Use yellow.
 - **Rectangle**: a whole region ("everything in this panel").
 - **At most about three marks on screen.** Clear before the next step; `undo_last`
-  removes just your latest mark.
+  removes just your latest call's marks (a labelled circle or a callout comes off whole).
 
 ### Colours (keep them consistent)
 
@@ -154,6 +154,11 @@ board must teach on its own: the user reads it, not the chat. Their keyboard goe
 Inkpane, and a hint at the bottom tells them how to get back (Ctrl+W / Ctrl+B, or Esc
 to close).
 
+**Call `set_board` (or give your first `batch` a `board`) at the start of every board
+drawing**, even if you opened one earlier
+in the session: the user may have closed it since, and then your drawing lands on their
+real screen, over their apps.
+
 Make it look designed, like a good slide or a tidy Excalidraw sketch, not a plain
 wireframe. The board is about 1568 × 656 (see `screen_info`). Lay it out on a grid:
 
@@ -195,27 +200,69 @@ wireframe. The board is about 1568 × 656 (see `screen_info`). Lay it out on a g
   top, pointing right; reply below, pointing left), each with its label: the top one's
   label lands above it, the bottom one's between the two, so keep them that far apart.
 - **Title**: `add_text` size 30, ink, at (40, 34); then a `line` under its left part,
-  3 px, in the main colour, about 160 px long, 12 px below the text.
+  3 px, in the main colour, about 160 px long, at y 88 (the text is about 42 px tall, so
+  that is 12 px below it).
 - **Notes panel**: a card at (1040, 110)–(1528, 540) with fill `#f8fafc`, outline
   `#cbd5e1`, `width` 1.5, no label. Heading "How it works" (size 20, ink) at (1064, 126).
   Then one note per step from y 170, `add_text` size 16, ink, `max_width` 430,
-  starting "1. ", "2. " …, 16 px apart (the tool says how tall each was).
+  starting "1. ", "2. " …: each next y is the previous y plus the height the tool
+  returned plus 16. The panel holds about six two-line notes; keep notes short, or merge
+  steps, rather than running past y 540.
 - **Key idea**: a callout card (yellow row of the table) with one sentence, `label`
   size 17, along the bottom.
 - Whitespace is design: align cards on a row or column, same sizes, equal gaps; leave
   the margins (40 px) empty. Never let text touch a line or another text.
 
-On a **blackboard** use the same layout with fills `#1e293b`, outlines in bright
-colours (`#60a5fa`, `#a78bfa`, `#4ade80`, `#f87171`, `#facc15`) and ink `#f1f5f9`.
+On a **blackboard** use the same layout and these colours instead:
+
+| Role | Fill (`fill_color`) | Outline (`color`) |
+|---|---|---|
+| The user / their device | `#1e293b` | `#60a5fa` |
+| A service or server | `#1e293b` | `#a78bfa` |
+| Data, files, results | `#1e293b` | `#4ade80` |
+| Something that can go wrong | `#1e293b` | `#f87171` |
+| Neutral / background thing | `#1e293b` | `#94a3b8` |
+| Key idea callout | `#1e293b` | `#facc15` |
+
+- **Ink** `#f1f5f9`; secondary text and arrow captions `#cbd5e1`. Neutral arrows
+  `#94a3b8` (the whiteboard's `#475569` nearly vanishes on the dark board); the flow you
+  are explaining in `#60a5fa`.
+- **Notes panel**: fill `#0f172a`, outline `#475569`, `width` 1.5.
 
 Build it **in teaching order**: title, then the first card, its arrow and its note,
-then the next part. The user watches it grow, like a teacher at a board.
+then the next part. The user watches it grow, like a teacher at a board. Send each part
+as one `batch` (its card, arrow, step marker and note); give the first batch
+`"board": "blackboard"` (or whiteboard) so the drawing never lands on the desktop.
 
 In the chat, say just one line, such as "The diagram is on your whiteboard. Press
-Ctrl+W to get back to your desktop." The explanation lives on the board. When the user
-comes back with questions, you can add to the same board or `clear` it and draw again.
+Ctrl+W to get back to your desktop." The explanation lives on the board. Then offer to
+`clear` it or to add to it. When the user comes back with questions, you can add to the
+same board or `clear` it and draw again.
 
-The whiteboard needs no screenshots, so it works even if the user declined them.
+The whiteboard needs no screenshots, so it works even if the user declined them. If the
+user allows screenshots, one `screenshot` after drawing lets you catch overlaps and text
+running into lines; fix them with `undo_last` or redraw. To keep a board as an image (for
+a tutorial or to share), use `save_screenshot`.
+
+### Pictures, not diagrams
+
+When the user asks for a picture (flowers, a house, a scene) rather than an explanation:
+
+- **Use `batch`**: one call with all the shapes in `items`, and what they share (kind,
+  colours, width) in `defaults`, so each item is short:
+  `{"center": [784, 165], "radius": 22}`. One batch per part of the picture (stems,
+  then each flower) lets the user watch it grow and keeps each `undo_last` small. A
+  picture of 100 shapes is a handful of calls.
+- **Draw back to front**: later shapes cover earlier ones. For example stems, then
+  leaves, then the flowers at the back, then those at the front, then a vase over the
+  stems' ends.
+- Ellipses and rectangles line up with the axes; they cannot be rotated. Build rounded
+  forms from circles (a ring of round petals), and use `diamond` for sparkles, leaves
+  seen edge-on or a bow.
+- Work out repeated geometry (a ring of petals, evenly spaced stars) with a short script
+  first, rather than by eye.
+- Use bright fills with a darker outline of the same hue (fill `#f472b6`, outline
+  `#be185d`); on a blackboard they glow.
 
 Write text with plain characters: the user's font may lack symbols such as arrows,
 ticks or emoji (Inkpane turns → into ->). Draw an arrow instead of typing one.
@@ -237,5 +284,6 @@ ticks or emoji (Inkpane turns → into ->). Draw an arrow instead of typing one.
 - Long text on screen. Labels are short; explanations go in chat.
 - Marks covering the thing they point at, or covering text the user must read.
 - Taking screenshots without saying so, or when not teaching.
+- Drawing a board picture without calling `set_board` (or `batch` with `board`) first.
 - `close`: it also wipes the user's own drawing. Only when the user says they're done.
 - `clear` with `scope: "all"` unless the user asks: it removes their drawing too.

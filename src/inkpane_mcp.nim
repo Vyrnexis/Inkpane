@@ -81,8 +81,12 @@ proc ensureRunning() =
 # Monitors and Model Space
 ############################
 
+var monitorCache: seq[Monitor]   # for the tool call being run; emptied after it
+
 proc monitors(): seq[Monitor] =
-  ## Queried on every call that needs it: monitors come and go.
+  ## Queried once per tool call that needs it (monitors come and go), not once per mark.
+  if monitorCache.len > 0:
+    return monitorCache
   let reply = call("Monitors")
   let list = g_variant_get_child_value(reply, 0)   # reply is (a(siiii))
   for i in 0 ..< int(g_variant_n_children(list)):
@@ -97,6 +101,7 @@ proc monitors(): seq[Monitor] =
     result.add m
   g_variant_unref(list)
   g_variant_unref(reply)
+  monitorCache = result
 
 proc modelSize(m: Monitor): (int, int) =
   (int(round(float(m.w) * m.scale)), int(round(float(m.h) * m.scale)))
@@ -162,13 +167,6 @@ proc points(args: JsonNode, minCount, maxCount: int): seq[Point] =
       raise newException(ToolError, "each point must be [x, y] with numbers")
     result.add((p[0].getFloat, p[1].getFloat))
 
-proc onScreen(m: Monitor, pts: openArray[Point]): GVariant =
-  ## Screenshot px to an a(dd) of the monitor's logical px, for Draw.
-  let builder = newBuilder("a(dd)")
-  for (x, y) in pts:
-    g_variant_builder_add(builder, "(dd)", cdouble(x / m.scale), cdouble(y / m.scale))
-  builder.finish
-
 proc box(args: JsonNode, key: string): (float, float, float, float) =
   ## [left, top, right, bottom], in either order.
   let b = if args.hasKey(key): args[key] else: newJNull()
@@ -196,11 +194,49 @@ proc plain(s: string): string =
   s.multiReplace(("→", "->"), ("⇒", "=>"), ("←", "<-"), ("⇐", "<="), ("↔", "<->"),
     ("✓", "OK"), ("✔", "OK"), ("✗", "X"), ("✘", "X"), ("**", ""), ("`", ""))
 
+type Shape = object   # one item for Inkpane's Draw, in the monitor's logical px
+  monitor: int
+  kind, color, text: string
+  points: seq[Point]
+  width: float
+  filled: bool
+
+var pending: seq[Shape]   # what the tool call being run has drawn, sent by flush
+
 proc draw(monitor: int, m: Monitor, kind: string, pts: openArray[Point], color: string,
     size: float, filled = false, label = "") =
-  ## Inkpane's Draw; `size` (line width, font size or marker radius) in screenshot px.
-  g_variant_unref(call("Draw", g_variant_new("(is@a(dd)sdbs)", cint(monitor), kind.cstring,
-    m.onScreen(pts), color.cstring, cdouble(size / m.scale), cint(filled), plain(label).cstring)))
+  ## Queues a shape for Inkpane's Draw; `size` (line width, font size or marker radius) in
+  ## screenshot px. A tool call's shapes go in one DrawMany at its end (flush): one D-Bus
+  ## round trip, and one undo_last step.
+  pending.add Shape(monitor: monitor, kind: kind, color: color, text: plain(label),
+    points: pts.mapIt((it[0] / m.scale, it[1] / m.scale)), width: size / m.scale,
+    filled: filled)
+
+proc encode(s: Shape): GVariant =
+  ## Draw's arguments, (isa(dd)sdbs).
+  let pts = newBuilder("a(dd)")
+  for (x, y) in s.points:
+    g_variant_builder_add(pts, "(dd)", cdouble(x), cdouble(y))
+  g_variant_new("(is@a(dd)sdbs)", cint(s.monitor), s.kind.cstring, pts.finish,
+    s.color.cstring, cdouble(s.width), cint(s.filled), s.text.cstring)
+
+proc flush() =
+  ## Sends the queued shapes. Inkpane checks them all before drawing any, so a refused
+  ## list leaves nothing half drawn.
+  if pending.len == 0:
+    return
+  let shapes = move(pending)
+  pending = @[]
+  let list = newBuilder("a(isa(dd)sdbs)")
+  for s in shapes:
+    g_variant_builder_add(list, "@(isa(dd)sdbs)", encode(s))
+  try:
+    g_variant_unref(call("DrawMany", g_variant_new("(@a(isa(dd)sdbs))", list.finish)))
+  except CatchableError as e:
+    if "UnknownMethod" notin e.msg:
+      raise
+    for s in shapes:   # an Inkpane from before DrawMany: one call per shape
+      g_variant_unref(call("Draw", encode(s)))
 
 proc capture(monitor: int, area: (int, int, int, int), width, height: int): string =
   ## Inkpane's Capture: the PNG it wrote. area in logical px (zero size: the whole monitor),
@@ -309,9 +345,26 @@ proc drawTool(args: JsonNode): JsonNode =
   if kind notin ["rectangle", "ellipse", "diamond", "arrow", "line", "highlighter", "pen"]:
     raise newException(ToolError, "kind must be rectangle, ellipse, diamond, arrow, line, highlighter or pen")
   let (index, m) = pick(args)
-  let pts = points(args, 2, (if kind == "pen": 10_000 else: 2))
-  let label = text(args, "label")
   let closed = kind in ["rectangle", "ellipse", "diamond"]
+  var pts: seq[Point]
+  if args.hasKey("center") and args["center"].kind != JNull:
+    # A shape by its centre and radius ([rx, ry] for an oval): no corners to work out.
+    let c = args["center"]
+    if not closed:
+      raise newException(ToolError, "center is for rectangle, ellipse and diamond")
+    if c.kind != JArray or c.len != 2 or c.anyIt(it.kind notin {JInt, JFloat}):
+      raise newException(ToolError, "center must be [x, y]")
+    let r = if args.hasKey("radius"): args["radius"] else: newJNull()
+    let (rx, ry) =
+      if r.kind in {JInt, JFloat}: (r.getFloat, r.getFloat)
+      elif r.kind == JArray and r.len == 2 and r.allIt(it.kind in {JInt, JFloat}):
+        (r[0].getFloat, r[1].getFloat)
+      else: raise newException(ToolError, "radius must be a number or [rx, ry]")
+    let (x, y) = (c[0].getFloat, c[1].getFloat)
+    pts = @[(x - rx, y - ry), (x + rx, y + ry)]
+  else:
+    pts = points(args, 2, (if kind == "pen": 10_000 else: 2))
+  let label = text(args, "label")
   if label.len > 0 and kind notin ["rectangle", "ellipse", "diamond", "arrow", "line"]:
     raise newException(ToolError, "label is for shapes, arrows and lines; use add_text")
   # Everything is checked before anything is drawn, so an error never leaves half a mark.
@@ -404,12 +457,76 @@ proc addStepMarker(args: JsonNode): JsonNode =
     number(args, "size", DefaultRadius), label = (if step > 0: $step else: ""))
   reply("Added a numbered step marker on monitor " & $index & ".")
 
+proc setBoard(args: JsonNode): JsonNode
+
+const BatchTools = ["draw", "circle", "callout", "add_text", "add_step_marker"]
+const BatchLimit = 500
+
+proc batch(args: JsonNode): JsonNode =
+  ## Many marks in one call, sent to Inkpane together: one round trip, one undo_last.
+  ## Every item is checked before anything is drawn.
+  let items = if args.hasKey("items"): args["items"] else: newJNull()
+  if items.kind != JArray or items.len == 0 or items.len > BatchLimit:
+    raise newException(ToolError, "items must be an array of 1 to " & $BatchLimit & " marks")
+  let defaults = if args.hasKey("defaults") and args["defaults"].kind != JNull:
+    args["defaults"].copy else: newJObject()
+  if defaults.kind != JObject:
+    raise newException(ToolError, "defaults must be an object")
+  if args.hasKey("monitor") and not defaults.hasKey("monitor"):
+    defaults["monitor"] = args["monitor"]
+  let board = text(args, "board")
+  if board.len > 0 and board notin ["none", "whiteboard", "blackboard"]:
+    raise newException(ToolError, "board must be none, whiteboard or blackboard")
+  let scope = text(args, "clear")
+  if scope.len > 0 and scope notin ["ai", "all"]:
+    raise newException(ToolError, "clear must be ai or all")
+  var notes: seq[string]
+  for i, item in items.elems:
+    if item.kind != JObject:
+      raise newException(ToolError, "item " & $i & " must be an object")
+    let merged = newJObject()
+    for key, value in defaults:
+      merged[key] = value
+    for key, value in item:
+      merged[key] = value
+    let name = text(merged, "tool", "draw")
+    if name notin BatchTools:
+      raise newException(ToolError, "item " & $i & ": tool must be " & BatchTools.join(", "))
+    # A default that does not fit this item (a fill for an arrow, a kind for text) is
+    # ignored rather than refused; the item's own keys are still checked.
+    let closed = text(merged, "kind") in ["rectangle", "ellipse", "diamond"]
+    for key in ["fill_color", "filled", "center", "radius"]:
+      if defaults.hasKey(key) and not item.hasKey(key) and not (name == "draw" and closed):
+        merged.delete(key)
+    if name != "draw" and defaults.hasKey("kind") and not item.hasKey("kind"):
+      merged.delete("kind")
+    let said = try:
+        case name
+        of "draw": drawTool(merged)
+        of "circle": circle(merged)
+        of "callout": callout(merged)
+        of "add_text": addText(merged)
+        else: addStepMarker(merged)
+      except ToolError as e:
+        raise newException(ToolError, "item " & $i & " (" & name & "): " & e.msg &
+          ". Nothing was drawn.")
+    if name in ["circle", "callout", "add_text"]:   # positions worth knowing
+      notes.add($i & ": " & said["content"][0]["text"].getStr)
+  # Checked: now change the screen, then callTool sends the marks.
+  if scope.len > 0:
+    g_variant_unref(call("Clear", g_variant_new("(b)", cint(scope == "ai"))))
+  if board.len > 0:
+    discard setBoard(%*{"board": board})
+  reply("Drew " & $items.len & " items as one step (undo_last removes them all)" &
+    (if board.len > 0: " on the " & board else: "") & "." &
+    (if notes.len > 0: "\n" & notes.join("\n") else: ""))
+
 proc undoLast(args: JsonNode): JsonNode =
   let r = call("UndoAi")
   var removed: cint
   g_variant_get(r, "(b)", addr removed)
   g_variant_unref(r)
-  reply(if removed != 0: "Removed your most recent mark." else: "You have no marks to remove.")
+  reply(if removed != 0: "Removed your most recent tool call's marks." else: "You have no marks to remove.")
 
 proc clear(args: JsonNode): JsonNode =
   let scope = text(args, "scope", "ai")
@@ -649,12 +766,17 @@ proc toolList(): JsonNode =
       "monitor's latest screenshot, origin top-left. Shapes take 2 points: for rectangle, " &
       "ellipse and diamond the start and the opposite corner; for arrow and line the tail " &
       "and the head (the arrowhead lands on the target); highlighter takes start and end. " &
-      "pen takes 2 or more points. To circle a control, use the circle tool.",
+      "pen takes 2 or more points. A rectangle, ellipse or diamond can instead take " &
+      "`center` and `radius`. To circle a control, use the circle tool. For more than a " &
+      "couple of marks, use batch.",
       schema("", %*{
         "kind": {"type": "string", "enum": ["rectangle", "ellipse", "diamond", "arrow",
           "line", "highlighter", "pen"]},
         "points": {"type": "array", "minItems": 2,
           "items": {"type": "array", "items": xy, "minItems": 2, "maxItems": 2}},
+        "center": {"type": "array", "items": xy, "minItems": 2, "maxItems": 2,
+          "description": "Instead of points, for rectangle, ellipse and diamond: [x, y] of the middle."},
+        "radius": {"description": "With center: half the width and height, a number or [rx, ry]."},
         "color": colorProp,
         "width": {"type": "number", "description": "Line width in screenshot pixels. Default 3."},
         "filled": {"type": "boolean", "description": "Fill rectangle, ellipse or diamond with its own colour."},
@@ -662,7 +784,25 @@ proc toolList(): JsonNode =
         "label": {"type": "string", "description": "For a rectangle, ellipse or diamond: text centred inside it. For an arrow or line: a short caption placed beside its middle, clear of the line."},
         "label_color": {"type": "string", "description": "Colour of the label; default red. On a board, black or white reads best."},
         "size": {"type": "number", "description": "Label font size in screenshot pixels. Default 16."},
-        "monitor": monitorProp}, @["kind", "points"])),
+        "monitor": monitorProp}, @["kind"])),
+    tool("batch", "Draw many marks in one call: much faster than one call per mark, and " &
+      "undo_last removes the whole batch. Each item is the arguments of draw, circle, " &
+      "callout, add_text or add_step_marker plus \"tool\" (default \"draw\"). `defaults` " &
+      "fills in keys an item leaves out (for example kind, color, fill_color, width, size), " &
+      "so repeated shapes stay short: {\"center\": [400, 300], \"radius\": 20}. A default " &
+      "that does not fit an item (a fill for an arrow) is ignored. Items are drawn in order, " &
+      "later ones on top. Everything is checked first; if one item is wrong, nothing is " &
+      "drawn and the error names it. Use it for diagrams and pictures on a board.",
+      schema("", %*{
+        "items": {"type": "array", "minItems": 1, "maxItems": BatchLimit,
+          "items": {"type": "object"},
+          "description": "The marks, in drawing order (back to front)."},
+        "defaults": {"type": "object", "description": "Arguments shared by every item; an item's own keys win."},
+        "board": {"type": "string", "enum": ["none", "whiteboard", "blackboard"],
+          "description": "Show this board first, so the drawing never lands on the user's desktop by mistake."},
+        "clear": {"type": "string", "enum": ["ai", "all"],
+          "description": "Clear first: \"ai\" removes only your marks."},
+        "monitor": monitorProp}, @["items"])),
     tool("circle", "Circle a control or area: give the box of the thing itself (its own " &
       "edges, in screenshot pixels) and Inkpane draws an ellipse that frames it with room " &
       "to spare. The best way to say \"click this\". Leave space around the box for it.",
@@ -712,7 +852,8 @@ proc toolList(): JsonNode =
         "size": {"type": "number", "description": "Radius in screenshot pixels. Default 11."},
         "number": {"type": "integer", "minimum": 1, "description": "Show this number instead of the next one in order."},
         "monitor": monitorProp}, @["x", "y"])),
-    tool("undo_last", "Remove the most recent mark you made.", schema("", %*{})),
+    tool("undo_last", "Remove the marks of your most recent drawing call: one shape, a " &
+      "labelled card or callout, or a whole batch.", schema("", %*{})),
     tool("clear", "Remove marks from the screen. \"ai\" (default) removes only the marks you " &
       "made; \"all\" also removes the user's own drawing (the user can undo that with Ctrl+Z).",
       schema("", %*{"scope": {"type": "string", "enum": ["ai", "all"]}})),
@@ -737,6 +878,7 @@ proc callTool(name: string, args: JsonNode): JsonNode =
       of "screen_info": screenInfo
       of "screenshot": screenshot
       of "draw": drawTool
+      of "batch": batch
       of "circle": circle
       of "callout": callout
       of "save_screenshot": saveScreenshot
@@ -753,11 +895,14 @@ proc callTool(name: string, args: JsonNode): JsonNode =
       else: raise newException(ToolError, "unknown tool " & name)
     ensureRunning()
     result = handler(args)
+    flush()
   except CatchableError as e:
+    pending.setLen(0)
     # Inkpane's own message, without GDBus's "GDBus.Error:org.….Failed: " in front.
     let message = if e.msg.startsWith("GDBus.Error:"): e.msg.split(": ", 1)[^1] else: e.msg
     result = reply(message)
     result["isError"] = %true
+  monitorCache.setLen(0)
 
 ############################
 # JSON-RPC
@@ -787,7 +932,7 @@ proc handle(request: JsonNode) =
         params["protocolVersion"].kind == JString and params["protocolVersion"].getStr in Versions:
       version = params["protocolVersion"].getStr
     result = %*{"protocolVersion": version, "capabilities": {"tools": {}},
-      "serverInfo": {"name": "inkpane", "version": "0.1.0"}, "instructions": Instructions}
+      "serverInfo": {"name": "inkpane", "version": "0.2.0"}, "instructions": Instructions}
   of "ping":
     result = newJObject()
   of "tools/list":

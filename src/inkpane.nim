@@ -75,6 +75,9 @@ const
       <arg name="filled" type="b" direction="in"/>
       <arg name="text" type="s" direction="in"/>
     </method>
+    <method name="DrawMany">
+      <arg name="shapes" type="a(isa(dd)sdbs)" direction="in"/>
+    </method>
     <method name="Clear">
       <arg name="aiOnly" type="b" direction="in"/>
     </method>
@@ -111,6 +114,7 @@ type
     CmdStatus = "Status"
     CmdMonitors = "Monitors"
     CmdDraw = "Draw"
+    CmdDrawMany = "DrawMany"
     CmdClear = "Clear"
     CmdUndoAi = "UndoAi"
     CmdSetBoard = "SetBoard"
@@ -153,7 +157,7 @@ type
     selectOn: Overlay    # overlay of that drag
     selectFrom, selectTo: FPoint
     capturing: bool      # a clean frame for a screenshot: none of Inkpane's own UI
-    aiOrder: seq[Overlay]   # overlay of each AI item, oldest first, for UndoAi
+    aiOrder: seq[seq[Overlay]]   # each Draw or DrawMany, oldest first: its items' overlays, for UndoAi
     warnedNoText: bool
     running: bool
     shortcuts: ShortcutSession
@@ -839,13 +843,25 @@ proc openForAi(app: var App) =
     raise newException(ActionError, "Could not open the overlay.")
   app.setPassthrough(true)
 
-proc aiDraw(app: var App, parameters: GVariant) =
+type AiShape = object   # one shape from Draw or DrawMany, checked and ready to add
+  monitor: int
+  tool: Tool
+  path: seq[FPoint]
+  ink: FColor
+  size: float32
+  filled: bool
+  text: string
+  number: int   # step markers: 0 picks the next number
+
+proc aiShape(app: var App, shape: GVariant): AiShape =
+  ## Reads and checks one (isa(dd)sdbs) without changing anything, so a list of shapes
+  ## is refused as a whole before any of it is drawn.
   var monitor: int32
   var kind, color, text: cstring
   var points: GVariant
   var width: cdouble
   var filled: cint
-  g_variant_get(parameters, "(i&s@a(dd)&sdb&s)", addr monitor, addr kind, addr points,
+  g_variant_get(shape, "(i&s@a(dd)&sdb&s)", addr monitor, addr kind, addr points,
     addr color, addr width, addr filled, addr text)
   var path: seq[FPoint]
   for i in 0 ..< int(g_variant_n_children(points)):
@@ -868,44 +884,61 @@ proc aiDraw(app: var App, parameters: GVariant) =
     raise newException(ValueError, $kind & " needs " & needs)
   if tool == Text and ($text).len == 0:
     raise newException(ValueError, "Text needs some text.")
-  let ink = if ($color).len == 0: app.settings.palette[0] else: parseColor($color)
   if tool in Placed and app.textMissing:
     raise newException(ValueError, "Text and step markers need SDL3_ttf, which is not installed.")
   if monitor notin 0'i32 ..< int32(monitors().len):
     raise newException(ValueError, "No monitor " & $monitor)
-
-  app.openForAi()
-  if monitor >= app.overlays.len:
-    raise newException(ValueError, "No overlay on monitor " & $monitor)
-  let overlay = app.overlays[monitor]
-  let size = float32(width)
-  case tool
-  of Marker:
-    let number = if ($text).len == 0: 0 else: parseInt($text)   # ValueError: refused
-    if number notin 0 .. 999:
+  result = AiShape(monitor: int(monitor), tool: tool, path: path,
+    ink: (if ($color).len == 0: app.settings.palette[0] else: parseColor($color)),
+    size: float32(width), filled: filled != 0, text: $text)
+  if tool == Marker:
+    result.number = if ($text).len == 0: 0 else: parseInt($text)   # ValueError: refused
+    if result.number notin 0 .. 999:
       raise newException(ValueError, "A step number goes from 1 to 999.")
-    overlay.scene.addMarker(path[0], (if size > 0: size else: 15), ink, byAi = true, number)
-  of Text:
-    let fontSize = if size > 0: size else: 24
-    var at = path[0]
-    if path.len == 2:   # centred in the box of the two points
-      let extent = measureText($text, fontSize)
-      at = FPoint(x: (path[0].x + path[1].x - extent.x) / 2, y: (path[0].y + path[1].y - extent.y) / 2)
-    overlay.scene.addItem(aiItem(Text, @[at], ink, fontSize, text = $text))
-  else:
-    overlay.scene.addItem(aiItem(tool, path, ink, (if size > 0: size else: 4), filled != 0))
-  app.aiOrder.add(overlay)
-  overlay.dirty = true
+
+proc aiDraw(app: var App, shapes: seq[AiShape]) =
+  ## Adds checked shapes; together they are one step for UndoAi.
+  if shapes.len == 0:
+    return
+  app.openForAi()
+  for s in shapes:
+    if s.monitor >= app.overlays.len:
+      raise newException(ValueError, "No overlay on monitor " & $s.monitor)
+  var group: seq[Overlay]
+  for s in shapes:
+    let overlay = app.overlays[s.monitor]
+    case s.tool
+    of Marker:
+      overlay.scene.addMarker(s.path[0], (if s.size > 0: s.size else: 15), s.ink, byAi = true,
+        s.number)
+    of Text:
+      let fontSize = if s.size > 0: s.size else: 24
+      var at = s.path[0]
+      if s.path.len == 2:   # centred in the box of the two points
+        let extent = measureText(s.text, fontSize)
+        at = FPoint(x: (s.path[0].x + s.path[1].x - extent.x) / 2,
+          y: (s.path[0].y + s.path[1].y - extent.y) / 2)
+      overlay.scene.addItem(aiItem(Text, @[at], s.ink, fontSize, text = s.text))
+    else:
+      overlay.scene.addItem(aiItem(s.tool, s.path, s.ink, (if s.size > 0: s.size else: 4),
+        s.filled))
+    group.add(overlay)
+    overlay.dirty = true
+  app.aiOrder.add(group)
 
 proc aiUndo(app: var App): bool =
-  ## Removes the newest AI item that is still on screen.
+  ## Removes the newest group of AI items (one Draw or DrawMany) still on screen.
   while app.aiOrder.len > 0:
-    let overlay = app.aiOrder.pop()
-    let index = overlay.scene.lastAi
-    if overlay in app.overlays and index >= 0:
-      overlay.scene.removeAt(index)
-      overlay.dirty = true
-      return true
+    let group = app.aiOrder.pop()
+    for i in countdown(group.high, 0):
+      let overlay = group[i]
+      let index = overlay.scene.lastAi
+      if overlay in app.overlays and index >= 0:
+        overlay.scene.removeAt(index)
+        overlay.dirty = true
+        result = true
+    if result:
+      return
 
 proc answer(app: var App, command: Command, parameters: GVariant): GVariant =
   ## Runs a call to our D-Bus service; the result is its reply.
@@ -927,7 +960,19 @@ proc answer(app: var App, command: Command, parameters: GVariant): GVariant =
         m.bounds.w, m.bounds.h)
     result = g_variant_new("(@a(siiii))", list.finish())
   of CmdDraw:
-    app.aiDraw(parameters)
+    app.aiDraw(@[app.aiShape(parameters)])
+  of CmdDrawMany:
+    let list = g_variant_get_child_value(parameters, 0)   # parameters is (a(isa(dd)sdbs))
+    defer: g_variant_unref(list)
+    var shapes: seq[AiShape]
+    for i in 0 ..< int(g_variant_n_children(list)):
+      let shape = g_variant_get_child_value(list, csize_t(i))
+      defer: g_variant_unref(shape)
+      try:
+        shapes.add(app.aiShape(shape))
+      except ValueError as e:
+        raise newException(ValueError, "Shape " & $i & ": " & e.msg)
+    app.aiDraw(shapes)
   of CmdClear:
     var aiOnly: cint
     g_variant_get(parameters, "(b)", addr aiOnly)

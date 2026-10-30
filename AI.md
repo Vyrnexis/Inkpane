@@ -116,15 +116,16 @@ the latest screenshot of a monitor, origin top-left.
 |---|---|
 | `screen_info` | Monitors and the size of each one's screenshot |
 | `screenshot` | One monitor, with the AI's marks, without Inkpane's toolbar |
-| `draw` | Rectangle, ellipse, diamond, arrow, line, highlighter or pen; cards with `fill_color`, labels on boxes and arrows |
+| `draw` | Rectangle, ellipse, diamond, arrow, line, highlighter or pen; cards with `fill_color`, labels on boxes and arrows; shapes by `center` and `radius` |
+| `batch` | Many marks in one call, with shared `defaults`, optionally on a board; one undo step |
 | `circle` | Frames a control from its own box, with an optional label outside |
 | `callout` | A step card with an arrow to a control and a step number |
 | `add_text`, `add_step_marker` | Text (optionally wrapped or centred) and numbered markers |
 | `save_screenshot` | Saves a full-resolution image of an area to a file |
-| `undo_last`, `clear`, `set_board`, `close` | Remove marks, show a board, close |
+| `undo_last`, `clear`, `set_board`, `close` | Remove the last call's marks, clear, show a board, close |
 | `click`, `scroll`, `type_text`, `press_keys` | Only with `[ai] clicking = yes` |
 
-Size: `inkpane-mcp` is about 225 KB, with no SDL. It talks to the running Inkpane over
+Size: `inkpane-mcp` is about 236 KB, with no SDL. It talks to the running Inkpane over
 D-Bus.
 
 ## Troubleshooting

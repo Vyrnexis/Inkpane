@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.1.0"
+version       = "0.2.0"
 author        = "Vyrnexis"
 description   = "Draw on your screen through a transparent Wayland overlay"
 license       = "GPL-3.0-or-later"
