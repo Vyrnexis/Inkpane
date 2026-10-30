@@ -3,7 +3,8 @@ import std/[os, strutils, tables]
 import dbus
 import glib
 
-# xdg-desktop-portal client: GlobalShortcuts and Screenshot. Portal requests answer
+# xdg-desktop-portal client: GlobalShortcuts and Screenshot here, RemoteDesktop (for
+# inkpane-mcp) in remote.nim. Portal requests answer
 # through Request::Response signals, which arrive while we pump the GLib main context.
 
 const
@@ -75,19 +76,19 @@ proc ensureSubscribed() =
 # Requests
 ############################
 
-proc newToken(): string =
+proc newToken*(): string =
   inc tokenCounter
   "inkpane" & $getCurrentProcessId() & "_" & $tokenCounter
 
-proc addString(options: GVariantBuilder, key, value: string) =
+proc addString*(options: GVariantBuilder, key, value: string) =
   g_variant_builder_add(options, "{sv}", key.cstring, g_variant_new_string(value.cstring))
 
-proc newOptions(token: string): GVariantBuilder =
+proc newOptions*(token: string): GVariantBuilder =
   result = newBuilder("a{sv}")
   if token.len > 0:
     result.addString("handle_token", token)
 
-proc portalRequest(interfaceName, methodName: string, timeoutSeconds: int,
+proc portalRequest*(interfaceName, methodName: string, timeoutSeconds: int,
     buildParameters: proc(token: string): GVariant): GVariant =
   # Returns the a{sv} results of a successful request; the caller must unref them.
   ensureSubscribed()

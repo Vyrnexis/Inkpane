@@ -242,6 +242,34 @@ What to expect:
   marks are kept apart from your own drawing: it removes only its own when it moves on,
   and you can undo or erase them like anything else.
 
+### Tutorials
+
+Ask Claude to *make a tutorial* and it writes one from your real app: *"Read
+AppGlider's user guide and make a tutorial for adding a GitHub repo"*. Claude plans the
+steps and checks them with you. Then, one step at a time, it puts a numbered callout
+card next to the control and saves an image of the app's window (only the window,
+never the rest of your desktop). You click, and it checks the result. At the end you get
+a folder with `tutorial.md` and the step images. Start Spectacle or OBS first if you
+also want a video: Claude's marks are in the recording.
+
+### Letting Claude click (optional)
+
+By default Claude only points and you click. If you'd rather it stepped through a task
+by itself, for example to make a tutorial while you watch, turn it on in the
+[settings](#settings):
+
+```ini
+[ai]
+clicking = yes
+```
+
+The first time Claude clicks, your desktop asks whether to allow input control; KDE
+shows that something is controlling the mouse while it does. Claude says what it is
+about to do before each action, checks a screenshot after it, and asks you before
+anything that deletes, pays, sends or installs; it never types passwords. Inkpane must
+be in click-through for clicks to reach your apps. Set `clicking = no` (or delete the
+line) to turn it off again: it takes effect immediately.
+
 Other MCP clients can run `inkpane-mcp` as a stdio server (`claude mcp add inkpane --
 inkpane-mcp` adds only the server to Claude Code, without the skill).
 
@@ -306,6 +334,12 @@ font = ""
 [screenshot]
 # Folder for screenshots (Ctrl+S). Empty: Inkpane in your Pictures folder.
 folder = ""
+
+[ai]
+# Let AI assistants using inkpane-mcp (such as Claude Code) click and type for you,
+# for example to step through a tutorial by themselves. Off: they only point and you
+# click. Your desktop still asks your permission the first time.
+clicking = no
 ```
 
 - Delete a line to get its default back; delete the file to get a fresh, fully

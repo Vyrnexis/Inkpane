@@ -1,6 +1,6 @@
 import std/[base64, json, math, os, osproc, sequtils, strutils, unicode]
 
-import inkpane/desktop/[dbus, glib]
+import inkpane/desktop/[dbus, glib, remote]
 
 # inkpane-mcp: an MCP server (newline-delimited JSON-RPC 2.0 on stdio) that lets an AI
 # client draw on the user's screen and take screenshots by calling the running Inkpane
@@ -33,7 +33,7 @@ type
 
   Monitor = object
     name: string
-    w, h: int      # logical px
+    x, y, w, h: int   # logical px, in desktop coordinates
     scale: float   # model px per logical px
 
 ############################
@@ -85,14 +85,17 @@ proc monitors(): seq[Monitor] =
   for i in 0 ..< int(g_variant_n_children(list)):
     let item = g_variant_get_child_value(list, csize_t(i))
     let name = g_variant_get_child_value(item, 0)
+    let x = g_variant_get_child_value(item, 1)
+    let y = g_variant_get_child_value(item, 2)
     let w = g_variant_get_child_value(item, 3)
     let h = g_variant_get_child_value(item, 4)
     var m = Monitor(name: $g_variant_get_string(name, nil),
+      x: int(g_variant_get_int32(x)), y: int(g_variant_get_int32(y)),
       w: int(g_variant_get_int32(w)), h: int(g_variant_get_int32(h)))
     m.scale = min(1.0, min(MaxSide / float(max(m.w, m.h)),
       sqrt(MaxPixels / float(m.w * m.h))))
     result.add m
-    for part in [name, w, h, item]:
+    for part in [name, x, y, w, h, item]:
       g_variant_unref(part)
   g_variant_unref(list)
   g_variant_unref(reply)
@@ -300,6 +303,131 @@ proc callout(args: JsonNode): JsonNode =
   reply("Callout drawn: card [" & $int(x) & ", " & $int(y) & ", " & $int(x + w) & ", " &
     $int(y + h) & "].")
 
+############################
+# Clicking and typing (only when the user allowed it)
+############################
+
+var session: RemoteSession   # started on the first click or key, kept for the session
+
+proc clickingAllowed(): bool =
+  ## The user's choice in inkpane.conf, [ai] clicking; read on every use, so turning it
+  ## off takes effect at once.
+  var section = ""
+  try:
+    for raw in lines(getConfigDir() / "inkpane" / "inkpane.conf"):
+      let line = raw.strip
+      if line.startsWith("["):
+        section = line.strip(chars = {'[', ']', ' '})
+      elif section == "ai" and line.startsWith("clicking") and '=' in line:
+        let value = line.split('=', 1)[1].strip(chars = {' ', '"'}).toLowerAscii
+        return value in ["yes", "true", "on", "1"]
+  except IOError, OSError:
+    discard
+  false
+
+proc ensureSession() =
+  if not clickingAllowed():
+    raise newException(ToolError, "The user has not allowed AI clicking ([ai] clicking in " &
+      "~/.config/inkpane/inkpane.conf). Ask them to do this step.")
+  if session.isNil:
+    try:
+      session = remote.start()
+    except CatchableError:
+      raise newException(ToolError, "The desktop did not allow input control: " &
+        getCurrentExceptionMsg())
+
+proc checkReachable(index: int, x, y: float) =
+  ## A click must reach the app: not draw on Inkpane's overlay, not press its toolbar.
+  let status = call("Status")
+  var open, through: cint
+  var bars: GVariant
+  g_variant_get(status, "(bb@a(iiii))", addr open, addr through, addr bars)
+  g_variant_unref(status)
+  defer: g_variant_unref(bars)
+  if open != 0 and through == 0:
+    raise newException(ToolError, "Inkpane is in drawing mode, so a click would draw. Ask " &
+      "the user to switch to click-through (1 or V), or call clear and close if your marks " &
+      "are no longer needed.")
+  if open != 0 and index < int(g_variant_n_children(bars)):
+    let bar = g_variant_get_child_value(bars, csize_t(index))
+    var bx, by, bw, bh: int32
+    g_variant_get(bar, "(iiii)", addr bx, addr by, addr bw, addr bh)
+    g_variant_unref(bar)
+    if x >= float(bx) and x < float(bx + bw) and y >= float(by) and y < float(by + bh):
+      raise newException(ToolError, "That spot is under Inkpane's toolbar (hidden in your " &
+        "screenshots). Ask the user to move the toolbar or hide it with Tab.")
+
+proc pointAt(args: JsonNode): (int, Stream, float, float) =
+  ## The monitor's stream and the point on it in logical px, after the checks.
+  let (index, m) = pick(args)
+  let (x, y) = (number(args, "x", -1) / m.scale, number(args, "y", -1) / m.scale)
+  if x < 0 or y < 0 or x >= float(m.w) or y >= float(m.h):
+    raise newException(ToolError, "x and y must be inside the screenshot")
+  checkReachable(index, x, y)
+  ensureSession()
+  let found = session.streams.filterIt(it.x == m.x and it.y == m.y)
+  let stream = if found.len > 0: found[0]
+               elif index < session.streams.len: session.streams[index]
+               else: raise newException(ToolError, "The desktop did not share monitor " & $index)
+  # Stream sizes can differ from the monitor's logical size; scale into them.
+  let sx = if stream.w > 0: float(stream.w) / float(m.w) else: 1.0
+  let sy = if stream.h > 0: float(stream.h) / float(m.h) else: 1.0
+  (index, stream, x * sx, y * sy)
+
+proc clickTool(args: JsonNode): JsonNode =
+  let (index, stream, x, y) = pointAt(args)
+  let which = text(args, "button", "left")
+  var code = 0'i32
+  for (name, c) in ButtonCodes:
+    if name == which: code = c
+  if code == 0:
+    raise newException(ToolError, "button must be left, right or middle")
+  session.moveTo(stream, x, y)
+  for _ in 1 .. (if flag(args, "double"): 2 else: 1):
+    session.button(code, true)
+    session.button(code, false)
+  reply("Clicked " & which & " at " & $int(number(args, "x", 0)) & ", " &
+    $int(number(args, "y", 0)) & " on monitor " & $index & ". Take a screenshot to see what it did.")
+
+proc scrollTool(args: JsonNode): JsonNode =
+  let (_, stream, x, y) = pointAt(args)
+  let steps = int(number(args, "amount", 0))
+  if steps == 0 or abs(steps) > 30:
+    raise newException(ToolError, "amount must be -30 .. 30 notches, not 0")
+  session.moveTo(stream, x, y)
+  session.scroll(steps)
+  reply("Scrolled " & $steps & " notches.")
+
+proc typeText(args: JsonNode): JsonNode =
+  let s = text(args, "text")
+  if s.len == 0 or s.runeLen > 2000:
+    raise newException(ToolError, "text must be 1 to 2000 characters")
+  ensureSession()
+  for rune in s.runes:
+    let sym = keysymFor(rune)
+    session.key(sym, true)
+    session.key(sym, false)
+  reply("Typed " & $s.runeLen & " characters into the focused field.")
+
+proc pressKeys(args: JsonNode): JsonNode =
+  ## "ctrl+s", "enter", "alt+f4" …: modifiers held while the last key is pressed.
+  let combo = text(args, "keys")
+  let parts = combo.split('+').mapIt(it.strip)
+  if parts.len == 0 or parts.anyIt(it.len == 0):
+    raise newException(ToolError, "keys must look like ctrl+s or enter")
+  var syms: seq[int]
+  for part in parts:
+    let sym = namedKeysym(part)
+    if sym < 0:
+      raise newException(ToolError, "unknown key " & part)
+    syms.add(sym)
+  ensureSession()
+  for sym in syms:
+    session.key(sym, true)
+  for i in countdown(syms.high, 0):
+    session.key(syms[i], false)
+  reply("Pressed " & combo & ".")
+
 proc drawTool(args: JsonNode): JsonNode =
   let kind = text(args, "kind")
   if kind notin ["rectangle", "ellipse", "diamond", "arrow", "line", "highlighter", "pen"]:
@@ -463,9 +591,28 @@ let colorProp = %*{"type": "string",
 proc tool(name, description: string, inputSchema: JsonNode): JsonNode =
   %*{"name": name, "description": description, "inputSchema": inputSchema}
 
+proc inputTools(): JsonNode =
+  ## Offered only when the user turned AI clicking on.
+  let xy = %*{"type": "number"}
+  let caution = " Only when the user asked you to do the steps. Never confirm anything " &
+    "that deletes, pays, sends or installs without asking them first, and never type " &
+    "passwords. Take a screenshot after each action to see what happened."
+  %*[
+    tool("click", "Click at x, y (pixels of the latest screenshot of that monitor)." & caution,
+      schema("", %*{"x": xy, "y": xy,
+        "button": {"type": "string", "enum": ["left", "right", "middle"]},
+        "double": {"type": "boolean"}, "monitor": monitorProp}, @["x", "y"])),
+    tool("scroll", "Scroll the mouse wheel at x, y: amount in notches, positive down." & caution,
+      schema("", %*{"x": xy, "y": xy, "amount": {"type": "integer"}, "monitor": monitorProp},
+        @["x", "y", "amount"])),
+    tool("type_text", "Type text into the focused field (click it first)." & caution,
+      schema("", %*{"text": {"type": "string"}}, @["text"])),
+    tool("press_keys", "Press a key or combination, such as enter, tab, esc, ctrl+s or " &
+      "alt+left." & caution, schema("", %*{"keys": {"type": "string"}}, @["keys"]))]
+
 proc toolList(): JsonNode =
   let xy = %*{"type": "number"}
-  %*[
+  result = %*[
     tool("screen_info", "List the monitors and the size of each one's screenshot. " &
       "Coordinates you give to other tools are pixels of that monitor's screenshot.",
       schema("", %*{})),
@@ -554,6 +701,9 @@ proc toolList(): JsonNode =
     tool("close", "Close Inkpane's overlay and clear everything, including the user's own " &
       "drawing. Only use this when the user is done.", schema("", %*{})),
   ]
+  if clickingAllowed():
+    for t in inputTools():
+      result.add(t)
 
 proc callTool(name: string, args: JsonNode): JsonNode =
   try:
@@ -566,6 +716,10 @@ proc callTool(name: string, args: JsonNode): JsonNode =
       of "circle": circle
       of "callout": callout
       of "save_screenshot": saveScreenshot
+      of "click": clickTool
+      of "scroll": scrollTool
+      of "type_text": typeText
+      of "press_keys": pressKeys
       of "add_text": addText
       of "add_step_marker": addStepMarker
       of "undo_last": undoLast

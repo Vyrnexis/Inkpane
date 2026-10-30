@@ -98,8 +98,9 @@ When the user asks you to *make a tutorial* (a guide others can follow later, e.
      `side` with empty space; add a `circle` around the control when it is small.
    - `save_screenshot` to `step-NN.png`, with `region` set to the app's window plus a
      small margin, so nothing else of the user's desktop is in the tutorial.
-   - Tell the user in chat what to do, and wait for "done" (or do it yourself if
-     clicking tools are available and the user allowed it).
+   - Tell the user in chat what to do, and wait for "done". (If clicking tools are
+     available and the user asked you to do it, do the step yourself instead: see
+     "When you may click".)
    - `screenshot` to check it worked, then `clear` before the next step.
 4. **Result**: after the last step, save a final screenshot of the finished state, then
    write `tutorial.md` in the same folder: a title, one line on what it achieves, any
@@ -111,6 +112,27 @@ When the user asks you to *make a tutorial* (a guide others can follow later, e.
 
 Callout text in a tutorial is written for the reader of the tutorial, not for the user
 in front of you: "Click **Updates** in the sidebar to see apps with new versions."
+
+## When you may click (opt-in)
+
+By default you only point; the user clicks. The `click`, `scroll`, `type_text` and
+`press_keys` tools exist only when the user turned on `[ai] clicking` in Inkpane's
+settings. Even then:
+
+- Do the steps yourself only when the user asks you to (e.g. "make the tutorial by
+  yourself"). Otherwise keep pointing and let them click: they learn by doing.
+- The first time, the desktop asks the user to allow input control; tell them to
+  expect that dialog.
+- Inkpane must be in click-through for clicks to reach apps; if a tool says it is in
+  drawing mode, ask the user to press 1 or V.
+- Before each action, say in one line what you're about to do. After it, take a
+  screenshot and check the result before the next one. If something unexpected
+  appears (a dialog, an error, a different page), stop and describe it to the user.
+- Never click anything that deletes, uninstalls, pays, sends, publishes or changes
+  accounts or passwords without the user saying yes in chat first. Never type
+  passwords or secrets. Use test data where the user's real data isn't needed.
+- In a tutorial you click, write the steps for a human reader anyway ("Click
+  **Add app**"), exactly as if the user had clicked.
 
 ## Whiteboard explanations
 

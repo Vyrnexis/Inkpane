@@ -97,10 +97,11 @@ first, then in Claude Code:
 /plugin install inkpane@inkpane
 ```
 
-Then ask things like *"How do I turn on night colour in KDE? Show me on my screen"* or
-*"Explain how git branches work, on the whiteboard"*. Claude asks before its first
-screenshot, marks one step at a time, and waits for you to do it. It can only draw:
-every click is yours. Other MCP clients can use `inkpane-mcp` directly
+Then ask things like *"How do I turn on night colour in KDE? Show me on my screen"*,
+*"Explain how git branches work, on the whiteboard"* or *"Make a tutorial for adding a
+repo to AppGlider"*. Claude asks before its first screenshot, marks one step at a time
+and waits for you to do it. By default it only draws and every click is yours; you can
+allow it to click for you in the settings. Other MCP clients can use `inkpane-mcp` directly
 (`claude mcp add inkpane -- inkpane-mcp` adds just the server). See the
 [guide](GUIDE.md#ai-claude-points-at-your-screen).
 
@@ -110,7 +111,7 @@ Measured on a release build (x86-64, KDE Plasma):
 
 | | |
 |---|---|
-| Binary | 285 KB; links only SDL3, libwayland-client and libc (`inkpane-mcp`: 160 KB, no SDL) |
+| Binary | 285 KB; links only SDL3, libwayland-client and libc (`inkpane-mcp`: 255 KB, no SDL) |
 | Idle in the background | ~10 MB resident (~1.5 MB of it Inkpane's own), 0 % CPU |
 | Drawing | ~8 µs per pen point; one draw call per monitor per frame |
 | Undo or erase on a busy screen | under 4 ms to rebuild 30 000 points |

@@ -43,6 +43,12 @@ font = ""
 [screenshot]
 # Folder for screenshots (Ctrl+S). Empty: Inkpane in your Pictures folder.
 folder = ""
+
+[ai]
+# Let AI assistants using inkpane-mcp (such as Claude Code) click and type for you,
+# for example to step through a tutorial by themselves. Off: they only point and you
+# click. Your desktop still asks your permission the first time.
+clicking = no
 """
 
 type

@@ -58,6 +58,11 @@ const
     <method name="Show"/>
     <method name="Hide"/>
     <method name="Quit"/>
+    <method name="Status">
+      <arg name="open" type="b" direction="out"/>
+      <arg name="clickThrough" type="b" direction="out"/>
+      <arg name="toolbars" type="a(iiii)" direction="out"/>
+    </method>
     <method name="Monitors">
       <arg name="monitors" type="a(siiii)" direction="out"/>
     </method>
@@ -103,6 +108,7 @@ type
     CmdShow = "Show"
     CmdHide = "Hide"
     CmdQuit = "Quit"
+    CmdStatus = "Status"
     CmdMonitors = "Monitors"
     CmdDraw = "Draw"
     CmdClear = "Clear"
@@ -816,7 +822,7 @@ proc runCommand(app: var App, command: Command) =
     if app.passthrough: app.setPassthrough(false) else: app.showOverlays()
   of CmdHide: app.hideOverlays()
   of CmdQuit: app.running = false
-  of CmdNone, CmdMonitors .. CmdCapture: discard   # D-Bus calls with arguments: answer()
+  of CmdNone, CmdStatus .. CmdCapture: discard   # D-Bus calls with arguments: answer()
 
 ############################
 # Drawn by an AI (inkpane-mcp)
@@ -912,6 +918,14 @@ proc answer(app: var App, command: Command, parameters: GVariant): GVariant =
   case command
   of CmdNone, CmdToggle .. CmdQuit:
     app.runCommand(command)
+  of CmdStatus:
+    # For inkpane-mcp before it clicks for the AI: a click must reach the app below,
+    # not draw (drawing mode) or press Inkpane's toolbar (x, y, w, h per monitor).
+    let bars = newBuilder("a(iiii)")
+    for overlay in app.overlays:
+      let b = if app.hideToolbar: FRect() else: overlay.toolbar.bounds
+      g_variant_builder_add(bars, "(iiii)", cint(b.x), cint(b.y), cint(ceil(b.w)), cint(ceil(b.h)))
+    result = g_variant_new("(bb@a(iiii))", cint(app.drawing), cint(app.passthrough), bars.finish())
   of CmdMonitors:
     let list = newBuilder("a(siiii)")
     for m in monitors():
