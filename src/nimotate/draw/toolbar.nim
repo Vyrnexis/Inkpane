@@ -4,8 +4,8 @@ import sdl3
 
 import render, scene
 
-# Floating strip at the top centre of each monitor: click-through, tools, fill, colours,
-# widths.
+# Floating strip at the top centre of each monitor (or wherever it was dragged):
+# click-through, tools, fill, colours, widths.
 # Icons and key digits are drawn as lines with the same mesh code as the drawing, so the
 # toolbar needs no font and no image files. The mesh is rebuilt only when what the
 # toolbar shows (tool, colour, width, fill, hovered button) changes.
@@ -13,13 +13,12 @@ import render, scene
 const
   ToolOrder* = [(Rectangle, 2), (Diamond, 3), (Ellipse, 4), (Arrow, 5), (Line, 6),
                 (Pen, 7), (Highlighter, 9), (Eraser, 0)]
-  WidthPresets* = [2'f32, 6, 14]
 
   ButtonSize = 36'f32
   ColorButtonWidth = 28'f32
   Padding = 6'f32
   GroupGap = 13'f32      # between groups, with a separator line in the middle
-  TopMargin = 56'f32     # clears a top panel; the overlay covers panels
+  TopMargin = 56'f32     # default spot clears a top panel; the overlay covers panels
   BarRadius = 10'f32
   ButtonRadius = 7'f32
   IconScale = 8.5'f32    # icons are drawn in -1 .. 1 and scaled to this
@@ -40,7 +39,7 @@ type
 
   Button* = object
     kind*: ButtonKind
-    index*: int     # into ToolOrder, the palette or WidthPresets
+    index*: int     # into ToolOrder, the palette or the width presets
     rect: FRect
 
   ToolbarState* = object
@@ -55,8 +54,10 @@ type
     buttons*: seq[Button]
     bounds*: FRect
     separators: seq[float32]   # x of each separator line
-    screenWidth: float32
+    screen: FPoint             # monitor size it was laid out for
+    place: FPoint              # offset from the default spot
     pixelSize: float32
+    presets: array[3, float32]
     mesh: Mesh
     shown: ToolbarState
     built: bool
@@ -71,14 +72,15 @@ proc center(rect: FRect): FPoint =
 # Layout
 ############################
 
-proc layout(toolbar: var Toolbar, screenWidth: float32, colors: int) =
+proc layout(toolbar: var Toolbar, screen, place: FPoint, colors: int) =
   toolbar.buttons.setLen(0)
   toolbar.separators.setLen(0)
-  toolbar.screenWidth = screenWidth
+  toolbar.screen = screen
+  toolbar.place = place
   var x = Padding
   template add(buttonKind: ButtonKind, i: int, buttonWidth: float32) =
     toolbar.buttons.add(Button(kind: buttonKind, index: i,
-      rect: FRect(x: x, y: TopMargin + Padding, w: buttonWidth, h: ButtonSize)))
+      rect: FRect(x: x, y: Padding, w: buttonWidth, h: ButtonSize)))
     x += buttonWidth
   template separate() =
     toolbar.separators.add(x + GroupGap / 2)
@@ -92,15 +94,25 @@ proc layout(toolbar: var Toolbar, screenWidth: float32, colors: int) =
   for i in 0 ..< colors:
     add(ColorButton, i, ColorButtonWidth)
   separate()
-  for i in 0 .. WidthPresets.high:
+  for i in 0 .. toolbar.presets.high:
     add(WidthButton, i, ButtonSize)
   let width = x + Padding
-  let left = round((screenWidth - width) / 2)
+  let height = ButtonSize + 2 * Padding
+  # Whole pixels keep the key digits crisp; clamped so a drag never loses it off screen.
+  let left = clamp(round((screen.x - width) / 2 + place.x), 0, max(screen.x - width, 0))
+  let top = clamp(round(TopMargin + place.y), 0, max(screen.y - height, 0))
   for button in toolbar.buttons.mitems:
     button.rect.x += left
+    button.rect.y += top
   for separator in toolbar.separators.mitems:
     separator += left
-  toolbar.bounds = FRect(x: left, y: TopMargin, w: width, h: ButtonSize + 2 * Padding)
+  toolbar.bounds = FRect(x: left, y: top, w: width, h: height)
+
+proc offset*(toolbar: Toolbar): FPoint =
+  ## Where the toolbar really is, as an offset from its default spot (a drag past the
+  ## screen edge is clamped, so this can differ from the place it was given).
+  FPoint(x: toolbar.bounds.x - round((toolbar.screen.x - toolbar.bounds.w) / 2),
+         y: toolbar.bounds.y - TopMargin)
 
 proc hit*(toolbar: Toolbar, p: FPoint): int =
   ## Index of the button at `p`, or -1.
@@ -183,13 +195,13 @@ proc addDigit(mesh: var Mesh, digit: int, topLeft: FPoint) =
                   FPoint(x: topLeft.x + segment[1][0] * W, y: topLeft.y + segment[1][1] * H)],
                  1.2, DigitColor)
 
-proc selected(button: Button, state: ToolbarState): bool =
+proc selected(toolbar: Toolbar, button: Button, state: ToolbarState): bool =
   case button.kind
   of PassButton: state.passthrough
   of ToolButton: not state.passthrough and ToolOrder[button.index][0] == state.tool
   of FillButton: state.fill and state.tool in Fillable
   of ColorButton: button.index == state.color
-  of WidthButton: abs(WidthPresets[button.index] - state.width) < 0.01
+  of WidthButton: abs(toolbar.presets[button.index] - state.width) < 0.01
 
 proc build(toolbar: var Toolbar, state: ToolbarState, palette: openArray[FColor]) =
   template mesh: untyped = toolbar.mesh
@@ -201,7 +213,7 @@ proc build(toolbar: var Toolbar, state: ToolbarState, palette: openArray[FColor]
   for i, button in toolbar.buttons:
     let back = roundedRect(FRect(x: button.rect.x + 2, y: button.rect.y + 2,
                                  w: button.rect.w - 4, h: button.rect.h - 4), ButtonRadius)
-    if button.selected(state):
+    if toolbar.selected(button, state):
       mesh.addFill(back, SelectedColor)
     elif i == state.hover:
       mesh.addFill(back, HoverColor)
@@ -235,16 +247,17 @@ proc build(toolbar: var Toolbar, state: ToolbarState, palette: openArray[FColor]
       mesh.addDisc(c, 9, SwatchEdgeColor)
       mesh.addDisc(c, 8, palette[button.index])
     of WidthButton:
-      let thickness = [2'f32, 4.5, 8][button.index]
+      let thickness = [2'f32, 4.5, 8][button.index]   # by rank: the presets can be anything
       mesh.addPath([FPoint(x: c.x - 8, y: c.y), FPoint(x: c.x + 8, y: c.y)], thickness, IconColor)
   toolbar.shown = state
   toolbar.built = true
 
-proc update*(toolbar: var Toolbar, screenWidth, pixelSize: float32, state: ToolbarState,
-    palette: openArray[FColor]) =
+proc update*(toolbar: var Toolbar, screen, place: FPoint, pixelSize: float32,
+    state: ToolbarState, palette: openArray[FColor], presets: array[3, float32]) =
   ## Lays out and rebuilds only what changed since the last frame.
-  if screenWidth != toolbar.screenWidth:
-    toolbar.layout(screenWidth, palette.len)
+  toolbar.presets = presets
+  if screen != toolbar.screen or place != toolbar.place or toolbar.buttons.len == 0:
+    toolbar.layout(screen, place, palette.len)
     toolbar.built = false
   if pixelSize != toolbar.pixelSize:
     toolbar.pixelSize = pixelSize

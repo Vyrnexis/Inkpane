@@ -57,6 +57,16 @@ installed `.desktop` file. `scripts/uninstall-user.sh` removes everything again.
 | C / Delete | Clear, keep drawing |
 | Esc | Stop drawing |
 
+## Settings
+
+On first run Nimotate writes `~/.config/nimotate/nimotate.conf`, with every setting
+and a comment explaining it: the palette, the width and its toolbar presets, and the
+tool, fill and toolbar visibility at start. Edit it by hand and restart Nimotate; a
+line you delete goes back to its default.
+
+Drag the toolbar by its background to move it. Nimotate remembers where in
+`~/.local/state/nimotate/state`, kept apart so it never rewrites your settings file.
+
 ## License
 
 MIT. The Wayland protocol XML files in `src/nimotate/wayland/protocols/` keep their own licences.

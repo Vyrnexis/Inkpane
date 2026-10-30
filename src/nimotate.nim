@@ -2,6 +2,7 @@ import std/[parseopt, posix, tables]
 
 import sdl3
 
+import nimotate/config
 import nimotate/desktop/[dbus, glib, portal, tray]
 import nimotate/draw/[render, scene, toolbar]
 import nimotate/wayland/overlay
@@ -14,16 +15,6 @@ import nimotate/wayland/overlay
 # while apps get the mouse and keyboard, until the toolbar or the toggle brings it back.
 
 const
-  Palette = [
-    FColor(r: 0.93, g: 0.20, b: 0.20, a: 1.0),  # 1 red
-    FColor(r: 0.98, g: 0.55, b: 0.13, a: 1.0),  # 2 orange
-    FColor(r: 0.98, g: 0.85, b: 0.15, a: 1.0),  # 3 yellow
-    FColor(r: 0.20, g: 0.78, b: 0.35, a: 1.0),  # 4 green
-    FColor(r: 0.20, g: 0.52, b: 0.98, a: 1.0),  # 5 blue
-    FColor(r: 0.62, g: 0.35, b: 0.90, a: 1.0),  # 6 purple
-    FColor(r: 1.00, g: 1.00, b: 1.00, a: 1.0),  # 7 white
-    FColor(r: 0.05, g: 0.05, b: 0.05, a: 1.0)   # 8 black
-  ]
   # Excalidraw's layout: a number key (by position, so any keyboard layout works) or a letter.
   ToolKeys = [
     (SCANCODE_2, SDLK_R, Rectangle),
@@ -74,12 +65,16 @@ type
     Transparent, Whiteboard, Blackboard
 
   App = object
+    settings: Settings
     overlays: seq[Overlay]
     tool: Tool
     color: FColor
     width: float32
     fill: bool           # new rectangles, diamonds and ellipses are filled
     hideToolbar: bool
+    toolbarPlace: FPoint     # offset from the toolbar's default spot, shared by all monitors
+    movingToolbar: Overlay   # overlay whose toolbar is being dragged
+    grab: FPoint             # pointer minus toolbarPlace when that drag started
     passthrough: bool    # click-through: only the toolbar still takes the pointer
     board: Board
     drawingOn: Overlay   # overlay that owns the drag in progress (drawing or erasing)
@@ -100,12 +95,13 @@ proc markAllDirty(app: var App) =
     overlay.dirty = true
 
 proc toolbarHit(app: App, overlay: Overlay): int =
-  if app.hideToolbar or not overlay.pointerInside or app.drawingOn != nil:
+  if app.hideToolbar or not overlay.pointerInside or app.drawingOn != nil or
+      app.movingToolbar != nil:
     return -1
   overlay.toolbar.hit(overlay.pointer)
 
 proc toolbarState(app: App, overlay: Overlay): ToolbarState =
-  ToolbarState(tool: app.tool, color: Palette.find(app.color), width: app.width,
+  ToolbarState(tool: app.tool, color: app.settings.palette.find(app.color), width: app.width,
     fill: app.fill, passthrough: app.passthrough, hover: app.toolbarHit(overlay))
 
 proc toolbarInTheWay(app: App, overlay: Overlay): bool =
@@ -126,7 +122,8 @@ proc redraw(app: App, overlay: Overlay) =
   renderer.drawActiveShape(overlay.mesh, overlay.scene)
   let toolbarShown = not app.hideToolbar and not app.toolbarInTheWay(overlay)
   if toolbarShown:
-    overlay.toolbar.update(overlay.width, overlay.mesh.pixelSize, app.toolbarState(overlay), Palette)
+    overlay.toolbar.update(FPoint(x: overlay.width, y: overlay.height), app.toolbarPlace,
+      overlay.mesh.pixelSize, app.toolbarState(overlay), app.settings.palette, app.settings.presets)
     renderer.draw(overlay.toolbar)
   let overToolbar = toolbarShown and overlay.pointer in overlay.toolbar.bounds
   if overlay.pointerInside and not overlay.scene.drawing and not overToolbar and
@@ -168,8 +165,8 @@ proc press(app: var App, button: Button) =
   of PassButton: discard
   of ToolButton: app.tool = ToolOrder[button.index][0]
   of FillButton: app.fill = not app.fill
-  of ColorButton: app.color = Palette[button.index]
-  of WidthButton: app.width = WidthPresets[button.index]
+  of ColorButton: app.color = app.settings.palette[button.index]
+  of WidthButton: app.width = app.settings.presets[button.index]
   app.markAllDirty()
 
 proc handleKey(app: var App, event: KeyboardEvent) =
@@ -177,8 +174,10 @@ proc handleKey(app: var App, event: KeyboardEvent) =
   let shift = (event.`mod` and KMOD_SHIFT) != 0
   let target = if app.drawingOn != nil: app.drawingOn else: app.overlayFor(event.windowID)
   if shift and event.scancode in SCANCODE_1 .. SCANCODE_8:
-    app.color = Palette[ord(event.scancode) - ord(SCANCODE_1)]
-    app.markAllDirty()
+    let index = ord(event.scancode) - ord(SCANCODE_1)
+    if index < app.settings.palette.len:
+      app.color = app.settings.palette[index]
+      app.markAllDirty()
     return
   if not (ctrl or shift) and app.drawingOn == nil:
     if event.scancode == SCANCODE_1 or event.key == SDLK_V:
@@ -240,17 +239,25 @@ proc handleEvent(app: var App, event: Event) =
     overlay.pointerInside = true
     if app.drawingOn == overlay:
       app.follow(overlay, point)
+    elif app.movingToolbar == overlay:
+      app.toolbarPlace = FPoint(x: point.x - app.grab.x, y: point.y - app.grab.y)
+      app.markAllDirty()
     overlay.dirty = true
   of EVENT_MOUSE_BUTTON_DOWN:
     let overlay = app.overlayFor(event.button.windowID)
     let button = event.button.button
     if overlay != nil and app.drawingOn == nil and int(button) in [BUTTON_LEFT, BUTTON_RIGHT]:
+      let point = FPoint(x: event.button.x, y: event.button.y)
       let pressed = app.toolbarHit(overlay)
       if pressed >= 0:
         if int(button) == BUTTON_LEFT:
           app.press(overlay.toolbar.buttons[pressed])
         return
-      let point = FPoint(x: event.button.x, y: event.button.y)
+      if not app.hideToolbar and point in overlay.toolbar.bounds:
+        if int(button) == BUTTON_LEFT:   # the background between buttons is the handle
+          app.movingToolbar = overlay
+          app.grab = FPoint(x: point.x - app.toolbarPlace.x, y: point.y - app.toolbarPlace.y)
+        return
       app.dragTool = if int(button) == BUTTON_RIGHT: Eraser else: app.tool
       app.dragButton = button
       if app.dragTool == Eraser:
@@ -260,6 +267,13 @@ proc handleEvent(app: var App, event: Event) =
       app.drawingOn = overlay
       overlay.dirty = true
   of EVENT_MOUSE_BUTTON_UP:
+    if app.movingToolbar != nil and int(event.button.button) == BUTTON_LEFT:
+      app.toolbarPlace = app.movingToolbar.toolbar.offset   # as clamped to the screen
+      app.movingToolbar = nil
+      saveToolbarPlace(app.toolbarPlace)
+      if app.passthrough:
+        app.setPassthrough(true)   # the clickable area moved with the toolbar
+      return
     if app.drawingOn != nil and event.button.button == app.dragButton:
       let mods = getModState()
       app.drawingOn.scene.finish(FPoint(x: event.button.x, y: event.button.y),
@@ -440,7 +454,10 @@ proc run(): int =
     echo "nimotate: needs a Wayland session (SDL video driver is ", getCurrentVideoDriver(), ")"
     return 1
 
-  var app = App(color: Palette[0], width: 6, running: true)
+  let settings = loadSettings()
+  var app = App(settings: settings, color: settings.palette[settings.color], width: settings.width,
+    tool: settings.tool, fill: settings.fill, hideToolbar: not settings.toolbar,
+    toolbarPlace: loadToolbarPlace(), running: true)
   exportObject(ServicePath, ServiceXml, ServiceInterface, serviceMethod)
   startTray(ServiceName, DefaultShortcutHint)
   defer: app.hideOverlays()
