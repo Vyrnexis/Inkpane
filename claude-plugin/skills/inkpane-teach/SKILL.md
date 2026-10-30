@@ -90,25 +90,62 @@ board must teach on its own: the user reads it, not the chat. Their keyboard goe
 Inkpane, and a hint at the bottom tells them how to get back (Ctrl+W / Ctrl+B, or Esc
 to close).
 
-Lay the board out as a page (the screenshot size from `screen_info`, e.g. 1568 × 656):
+Make it look designed, like a good slide or a tidy Excalidraw sketch, not a plain
+wireframe. The board is about 1568 × 656 (see `screen_info`). Lay it out on a grid:
 
-- **Title** at the top left: `add_text`, size 26, black (white on a blackboard).
-- **Diagram** in the left two thirds: boxes (`draw` `rectangle` with the thing's name
-  as `label`, `label_color` black) and `arrow`s for flows; `diamond` for decisions,
-  `ellipse` for start and end. Boxes about 200 × 80 px, 120+ px apart, laid out left to
-  right or top to bottom. Keep 40+ px between arrows that run in opposite directions.
-- **Numbered notes** in the right third: one per step, each a sentence or two, as
-  `add_text` with `max_width` (about 380 px) so it wraps; put each note under the
-  previous one (the tool says how tall it was) with a 14 px gap. Start each note with
-  its number ("1. Your browser asks a DNS server…").
-- **Step markers** on the diagram (`add_step_marker`, blue) next to the arrow or box
-  each note explains, so the numbers tie the two together.
-- One short **summary** line at the bottom of the notes if it helps ("In short: …").
+```
+ 40 ┌ Title (size 30, ink) ───────────────────────────────┐
+    │ accent line under it (3 px, the main colour)         │
+110 │ ┌─ diagram area: x 40–1000 ──────────┐ ┌ notes panel ┐
+    │ │ cards, arrows, step markers        │ │ x 1040–1528 │
+    │ └────────────────────────────────────┘ └─────────────┘
+560 │ ┌ key idea callout, full width or under the diagram ┐
+    └────────────────────────────────────────────────────────┘
+```
 
-Build it **in teaching order**: draw a part, write its note, then the next part. The
-user watches it grow, like a teacher at a board. Use black for text and boxes, and keep
-colour for meaning (green: the flow you're following, blue: markers, red: what goes
-wrong).
+**Colours on a whiteboard** (use hex; keep to these so it looks consistent):
+
+| Role | Fill (`fill_color`) | Outline (`color`) |
+|---|---|---|
+| The user / their device | `#dbeafe` | `#2563eb` |
+| A service or server | `#ede9fe` | `#7c3aed` |
+| Data, files, results | `#dcfce7` | `#16a34a` |
+| Something that can go wrong | `#fee2e2` | `#dc2626` |
+| Neutral / background thing | `#f1f5f9` | `#64748b` |
+| Key idea callout | `#fef9c3` | `#ca8a04` |
+
+- **Ink** for text: `#1e293b`; secondary text (arrow labels): `#475569`.
+- **Cards**: `draw` `rectangle` with `fill_color` + `color` from the table, `width` 2,
+  `label` the thing's name, `label_color` `#1e293b`, `size` 18. About 190 × 70 px.
+  Use `ellipse` cards for start/end, `diamond` for a decision.
+- **Arrows**: `#475569`, `width` 3; the flow you are explaining right now in the
+  main colour. Leave 12 px between an arrow's ends and the cards it joins. Caption an
+  arrow with its own `label` (size 15, `label_color` `#475569`): Inkpane places it
+  beside the middle, clear of the line, so don't position arrow captions with
+  `add_text`. Keep captions to a few words, and arrows long enough for them (150+ px).
+  Two arrows between the same cards: run them 40+ px apart, not on top of each other.
+- **Step markers** (`add_step_marker`, radius 13, the main colour) a quarter of the way
+  along each arrow from its tail, 18 px to the side: the middle is the label's.
+- **Arrange cards in rows and columns** so arrows run level or upright; avoid diagonal
+  arrows. For a request and its reply, use two level arrows 36–44 px apart (request on
+  top, pointing right; reply below, pointing left), each with its label: the top one's
+  label lands above it, the bottom one's between the two, so keep them that far apart.
+- **Title**: `add_text` size 30, ink, at (40, 34); then a `line` under its left part,
+  3 px, in the main colour, about 160 px long, 12 px below the text.
+- **Notes panel**: a card at (1040, 110)–(1528, 540) with fill `#f8fafc`, outline
+  `#cbd5e1`, `width` 1.5, no label. Heading "How it works" (size 20, ink) at (1064, 126).
+  Then one note per step from y 170, `add_text` size 16, ink, `max_width` 430,
+  starting "1. ", "2. " …, 16 px apart (the tool says how tall each was).
+- **Key idea**: a callout card (yellow row of the table) with one sentence, `label`
+  size 17, along the bottom.
+- Whitespace is design: align cards on a row or column, same sizes, equal gaps; leave
+  the margins (40 px) empty. Never let text touch a line or another text.
+
+On a **blackboard** use the same layout with fills `#1e293b`, outlines in bright
+colours (`#60a5fa`, `#a78bfa`, `#4ade80`, `#f87171`, `#facc15`) and ink `#f1f5f9`.
+
+Build it **in teaching order**: title, then the first card, its arrow and its note,
+then the next part. The user watches it grow, like a teacher at a board.
 
 In the chat, say just one line, such as "The diagram is on your whiteboard. Press
 Ctrl+W to get back to your desktop." The explanation lives on the board. When the user

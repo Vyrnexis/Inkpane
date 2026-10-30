@@ -46,6 +46,11 @@ proc onBackground*(color, background: FColor): FColor =
     let value = if light: 0.05'f32 else: 1'f32
     result = FColor(r: value, g: value, b: value, a: color.a)
 
+proc shown*(item: Item, background: FColor): FColor =
+  ## The colour an item is drawn in. An AI picks its colours for the board on purpose
+  ## (light tints on a whiteboard), so only hand-drawn items get auto-contrast.
+  if item.byAi: item.color else: item.color.onBackground(background)
+
 proc setBackground*(mesh: var Mesh, background: FColor) =
   ## Called when the board changes; the next update rebuilds the mesh in its colours.
   if background != mesh.background:
@@ -162,7 +167,7 @@ proc addFill*(mesh: var Mesh, path: openArray[FPoint], color: FColor) =
     mesh.indices.add([base, a, b, a, a + 1, b, a + 1, b + 1, b])
 
 proc addShape(mesh: var Mesh, item: Item) =
-  let color = item.color.onBackground(mesh.background)
+  let color = item.shown(mesh.background)
   case item.kind
   of Text:
     return   # textures, drawn by the caller
@@ -195,7 +200,7 @@ proc update*(mesh: var Mesh, scene: Scene) =
   while mesh.item < count:
     template item: untyped = scene.items[mesh.item]
     if item.kind == Pen:
-      mesh.addPath(item.points, item.width, item.color.onBackground(mesh.background), mesh.point)
+      mesh.addPath(item.points, item.width, item.shown(mesh.background), mesh.point)
       mesh.point = item.points.len
       if scene.drawing and mesh.item == scene.items.high:
         break   # this pen stroke is still growing

@@ -214,14 +214,38 @@ proc drawTool(args: JsonNode): JsonNode =
   let (index, m) = pick(args)
   let pts = points(args, m, 2, (if kind == "pen": 10_000 else: 2))
   let label = text(args, "label")
-  if label.len > 0 and kind notin ["rectangle", "ellipse", "diamond"]:
-    raise newException(ToolError, "label is for rectangle, ellipse and diamond; use add_text")
+  let closed = kind in ["rectangle", "ellipse", "diamond"]
+  if label.len > 0 and kind notin ["rectangle", "ellipse", "diamond", "arrow", "line"]:
+    raise newException(ToolError, "label is for shapes, arrows and lines; use add_text")
   # Everything is checked before anything is drawn, so an error never leaves half a mark.
   let (labelColor, labelSize) = (color(args, "label_color"), number(args, "size", DefaultFont))
+  let fill = color(args, "fill_color")
+  if fill.len > 0 and not closed:
+    raise newException(ToolError, "fill_color is for rectangle, ellipse and diamond")
+  if fill.len > 0:   # a card: the tinted inside first, the outline over its edge
+    draw(index, kind, points(args, m, 2, 2), fill, 1, true)
   draw(index, kind, pts, color(args), number(args, "width", DefaultWidth) / m.scale,
     flag(args, "filled"))
-  if label.len > 0:   # Inkpane centres it in the shape's box
+  if label.len > 0 and closed:   # Inkpane centres it in the shape's box
     draw(index, "text", points(args, m, 2, 2), labelColor, labelSize / m.scale, false, label)
+  elif label.len > 0:
+    # Beside the middle of the arrow, clear of the line: above a level one (centred by
+    # Inkpane, which knows the text's width), to the right of a steep one.
+    let (a, b) = (args["points"][0], args["points"][1])
+    let (ax, ay, bx, by) = (a[0].getFloat, a[1].getFloat, b[0].getFloat, b[1].getFloat)
+    let (mx, my) = ((ax + bx) / 2, (ay + by) / 2)
+    let length = max(hypot(bx - ax, by - ay), 1)
+    let (dx, dy) = ((bx - ax) / length, (by - ay) / length)
+    let at =
+      if abs(dx) >= 0.5:
+        var (nx, ny) = (dy, -dx)   # the normal pointing up the screen
+        if ny > 0: (nx, ny) = (-nx, -ny)
+        let reach = labelSize * 0.75 + 6
+        let (cx, cy) = (mx + nx * reach, my + ny * reach)
+        %*{"points": [[cx, cy], [cx, cy]]}
+      else:
+        %*{"points": [[mx + 10, my - labelSize * 0.7]]}
+    draw(index, "text", points(at, m, 1, 2), labelColor, labelSize / m.scale, false, label)
   reply("Drew " & kind & (if label.len > 0: " with its label" else: "") & " on monitor " &
     $index & ".")
 
@@ -368,8 +392,9 @@ proc toolList(): JsonNode =
           "items": {"type": "array", "items": xy, "minItems": 2, "maxItems": 2}},
         "color": colorProp,
         "width": {"type": "number", "description": "Line width in screenshot pixels. Default 3."},
-        "filled": {"type": "boolean", "description": "Fill rectangle, ellipse or diamond."},
-        "label": {"type": "string", "description": "Text centred inside a rectangle, ellipse or diamond (diagrams)."},
+        "filled": {"type": "boolean", "description": "Fill rectangle, ellipse or diamond with its own colour."},
+        "fill_color": {"type": "string", "description": "Inside colour of a rectangle, ellipse or diamond, under an outline in `color`: a light tint such as #dbeafe makes a card. #rrggbb or a colour name."},
+        "label": {"type": "string", "description": "For a rectangle, ellipse or diamond: text centred inside it. For an arrow or line: a short caption placed beside its middle, clear of the line."},
         "label_color": {"type": "string", "description": "Colour of the label; default red. On a board, black or white reads best."},
         "size": {"type": "number", "description": "Label font size in screenshot pixels. Default 16."},
         "monitor": monitorProp}, @["kind", "points"])),

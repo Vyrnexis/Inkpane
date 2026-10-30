@@ -223,7 +223,7 @@ proc drawTexts(overlay: Overlay, background: FColor) =
     of Text:
       let size = if item.text.len == 0: FPoint(x: 0, y: lineHeight(item.width))   # just typing
                  else: renderer.drawText(overlay.texts, item.text, item.points[0], item.width,
-                   item.color.onBackground(background), background.a < 1, overlay.scale)
+                   item.shown(background), background.a < 1, overlay.scale)
                    # the halo keeps text readable over the desktop; a board needs none
       item.setBox(size)   # for the eraser and the typing hint
     of Marker:
@@ -231,7 +231,7 @@ proc drawTexts(overlay: Overlay, background: FColor) =
       let b = item.points[1]
       let size = item.width * 0.6
       let extent = measureText(item.text, size)
-      let disc = item.color.onBackground(background)
+      let disc = item.shown(background)
       let light = disc.r * 0.3 + disc.g * 0.59 + disc.b * 0.11 > 0.6
       let ink = if light: FColor(r: 0.05, g: 0.05, b: 0.05, a: 1) else: FColor(r: 1, g: 1, b: 1, a: 1)
       discard renderer.drawText(overlay.texts, item.text,
@@ -248,7 +248,7 @@ proc drawTexts(overlay: Overlay, background: FColor) =
     var caret: Mesh
     caret.setPixelSize(overlay.mesh.pixelSize)
     caret.addPath([FPoint(x: x, y: y + 2), FPoint(x: x, y: y + height - 2)], 2,
-      item.color.onBackground(background))
+      item.shown(background))
     renderer.draw(caret)
 
 proc drawTooltip(app: App, overlay: Overlay) =
