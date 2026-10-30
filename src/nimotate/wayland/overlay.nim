@@ -57,6 +57,8 @@ proc newOverlay(display: DisplayID): Overlay =
 
   let layer = createOverlayLayer(wlDisplay, wlSurface, wlOutput, LayerNamespace)
   if layer.isNil or layer.closed or not layer.configured:
+    if not layer.isNil:
+      layer.destroy()
     destroyWindow(window)
     fail("The compositor refused the overlay surface")
 
@@ -93,20 +95,6 @@ proc updateRenderScale*(overlay: Overlay) =
 proc closedByCompositor*(overlay: Overlay): bool =
   overlay.layer.closed
 
-proc openOverlays*(): seq[Overlay] =
-  ## One overlay per connected monitor.
-  var count: cint
-  let displays = getDisplays(count)
-  if displays.isNil or count == 0:
-    raise newException(OverlayError, "No monitors found: " & $getError())
-  try:
-    for i in 0 ..< count:
-      let overlay = newOverlay(displays[i])
-      overlay.updateRenderScale()
-      result.add(overlay)
-  finally:
-    sdlFree(displays)
-
 proc close*(overlay: Overlay) =
   if overlay.renderer != nil:
     destroyRenderer(overlay.renderer)
@@ -117,3 +105,20 @@ proc close*(overlay: Overlay) =
   if overlay.window != nil:
     destroyWindow(overlay.window)
     overlay.window = nil
+
+proc openOverlays*(): seq[Overlay] =
+  ## One overlay per connected monitor; all or none, so a failure never leaves one open.
+  var count: cint
+  let displays = getDisplays(count)
+  if displays.isNil or count == 0:
+    raise newException(OverlayError, "No monitors found: " & $getError())
+  try:
+    for i in 0 ..< count:
+      result.add(newOverlay(displays[i]))
+      result[^1].updateRenderScale()
+  except OverlayError:
+    for overlay in result:
+      overlay.close()
+    raise
+  finally:
+    sdlFree(displays)

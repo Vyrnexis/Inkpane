@@ -48,6 +48,8 @@ type
     setProperty*: pointer
     padding: array[8, pointer]
 
+  GSourceFunc* = proc(userData: pointer): cint {.cdecl.}   # return 0 to remove the source
+
   GDBusSignalCallback* = proc(
     connection: GDBusConnection,
     senderName, objectPath, interfaceName, signalName: cstring,
@@ -62,6 +64,8 @@ type
 proc g_free*(mem: pointer) {.cdecl, importc, dynlib: glibLib.}
 proc g_error_free*(error: ptr GError) {.cdecl, importc, dynlib: glibLib.}
 proc g_main_context_iteration*(context: pointer, mayBlock: cint): cint {.cdecl, importc, dynlib: glibLib.}
+proc g_timeout_add_seconds*(interval: cuint, function: GSourceFunc, data: pointer): cuint {.cdecl, importc, dynlib: glibLib.}
+proc g_source_remove*(tag: cuint): cint {.cdecl, importc, dynlib: glibLib.}
 proc g_object_unref*(obj: pointer) {.cdecl, importc, dynlib: gobjectLib.}
 
 ############################

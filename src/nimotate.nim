@@ -145,6 +145,8 @@ proc handleEvent(app: var App, event: Event) =
       app.drawingOn.dirty = true
       app.drawingOn = nil
   of EVENT_MOUSE_WHEEL:
+    if event.wheel.y == 0:
+      return   # horizontal scroll
     let step = if event.wheel.y > 0: WidthStep else: -WidthStep
     app.width = clamp(app.width + step, MinWidth, MaxWidth)
     app.markAllDirty()

@@ -1,4 +1,4 @@
-import std/[os, strutils, tables, times]
+import std/[os, strutils, tables]
 
 import dbus
 import glib
@@ -12,7 +12,7 @@ const
   GlobalShortcutsInterface = "org.freedesktop.portal.GlobalShortcuts"
   RequestInterface = "org.freedesktop.portal.Request"
   SessionInterface = "org.freedesktop.portal.Session"
-  InteractiveTimeoutSeconds = 300.0
+  InteractiveTimeoutSeconds = 300   # the user may be looking at a confirmation dialog
 
 type
   PortalError* = object of IOError
@@ -57,6 +57,10 @@ proc onShortcutActivated(connection: GDBusConnection,
   activatedShortcuts.add(($g_variant_get_string(sessionValue, nil), $g_variant_get_string(idValue, nil)))
   g_variant_unref(sessionValue)
   g_variant_unref(idValue)
+
+proc onTimeout(timedOut: pointer): cint {.cdecl.} =
+  cast[ptr bool](timedOut)[] = true
+  0
 
 proc ensureSubscribed() =
   if subscribed:
@@ -103,7 +107,11 @@ proc portalRequest(methodName: string, buildParameters: proc(token: string): GVa
   let handlePath = $handle
   g_variant_unref(reply)
 
-  let startedAt = epochTime()
+  # Sleep in GLib until the Response signal (or the timeout) arrives.
+  var timedOut = false
+  let timeout = g_timeout_add_seconds(InteractiveTimeoutSeconds, onTimeout, addr timedOut)
+  defer:
+    if not timedOut: discard g_source_remove(timeout)
   while true:
     for path in [expectedPath, handlePath]:
       if path in pendingResponses:
@@ -117,10 +125,9 @@ proc portalRequest(methodName: string, buildParameters: proc(token: string): GVa
         else:
           g_variant_unref(response.results)
           raise newException(PortalError, methodName & " was rejected by the desktop portal.")
-    if epochTime() - startedAt > InteractiveTimeoutSeconds:
+    if timedOut:
       raise newException(PortalError, "Timed out waiting for the desktop portal.")
-    if g_main_context_iteration(nil, 0) == 0:
-      sleep(8)
+    discard g_main_context_iteration(nil, 1)
 
 ############################
 # GlobalShortcuts
