@@ -162,10 +162,15 @@ proc points(args: JsonNode, m: Monitor, minCount, maxCount: int): GVariant =
       cdouble(p[1].getFloat / m.scale))
   builder.finish
 
+proc plain(s: string): string =
+  ## Inkpane draws text in one font, and common ones (Noto Sans) have no arrows or ticks.
+  s.multiReplace(("→", "->"), ("⇒", "=>"), ("←", "<-"), ("⇐", "<="), ("↔", "<->"),
+    ("✓", "OK"), ("✔", "OK"), ("✗", "X"), ("✘", "X"))
+
 proc draw(monitor: int, kind: string, pts: GVariant, color: string, width: float,
     filled: bool, label = "") =
   g_variant_unref(call("Draw", g_variant_new("(is@a(dd)sdbs)", cint(monitor), kind.cstring,
-    pts, color.cstring, cdouble(width), cint(filled), label.cstring)))
+    pts, color.cstring, cdouble(width), cint(filled), plain(label).cstring)))
 
 ############################
 # Tools
@@ -268,11 +273,29 @@ proc addText(args: JsonNode): JsonNode =
     raise newException(ToolError, "text must not be empty")
   let (index, m) = pick(args)
   let (x, y) = (number(args, "x", 0), number(args, "y", 0))
+  let size = number(args, "size", DefaultFont)
+  let maxWidth = number(args, "max_width", 0)
+  var shown = label
+  if maxWidth > 0:   # wrap at word boundaries, guessing ~0.52 em per character
+    let columns = max(int(maxWidth / (size * 0.52)), 8)
+    var lines: seq[string]
+    for paragraph in shown.split('\n'):
+      var line = ""
+      for word in strutils.splitWhitespace(paragraph):
+        if line.len > 0 and line.runeLen + 1 + word.runeLen > columns:
+          lines.add(line)
+          line = word
+        else:
+          line = if line.len == 0: word else: line & " " & word
+      lines.add(line)
+    shown = lines.join("\n")
   # Two equal points: Inkpane centres the text on them.
   let at = if flag(args, "centered"): %*{"points": [[x, y], [x, y]]} else: %*{"points": [[x, y]]}
-  draw(index, "text", points(at, m, 1, 2), color(args), number(args, "size", DefaultFont) / m.scale,
-    false, label)
-  reply("Added text on monitor " & $index & ".")
+  draw(index, "text", points(at, m, 1, 2), color(args), size / m.scale, false, shown)
+  let lineCount = shown.count('\n') + 1
+  reply("Added text on monitor " & $index & ": " & $lineCount &
+    (if lineCount == 1: " line" else: " lines") & ", about " & $int(float(lineCount) * size * 1.4) &
+    " px tall.")
 
 proc addStepMarker(args: JsonNode): JsonNode =
   let (index, m) = pick(args)
@@ -368,6 +391,7 @@ proc toolList(): JsonNode =
       schema("", %*{"x": xy, "y": xy, "text": {"type": "string"}, "color": colorProp,
         "size": {"type": "number", "description": "Font size in screenshot pixels. Default 16."},
         "centered": {"type": "boolean", "description": "x, y is the centre of the text instead of its top-left corner."},
+        "max_width": {"type": "number", "description": "Wrap the text into lines no wider than this (screenshot pixels): for notes of a sentence or two on a board."},
         "monitor": monitorProp}, @["x", "y", "text"])),
     tool("add_step_marker", "Place a numbered circle (1, 2, 3, ... assigned automatically) " &
       "centred at x, y, to mark the order of steps.",
@@ -379,7 +403,9 @@ proc toolList(): JsonNode =
       "made; \"all\" also removes the user's own drawing (the user can undo that with Ctrl+Z).",
       schema("", %*{"scope": {"type": "string", "enum": ["ai", "all"]}})),
     tool("set_board", "Show a blank whiteboard or blackboard over the screen, for diagrams. " &
-      "The screen content is hidden while it is on. \"none\" brings the screen back.",
+      "It hides everything, including the user's chat with you, so write the explanation " &
+      "on the board itself (see add_text's max_width). The user's keyboard goes to Inkpane " &
+      "and a hint tells them how to get back. \"none\" brings the screen back.",
       schema("", %*{"board": {"type": "string", "enum": ["none", "whiteboard", "blackboard"]}},
         @["board"])),
     tool("close", "Close Inkpane's overlay and clear everything, including the user's own " &

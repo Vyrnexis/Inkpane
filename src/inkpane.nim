@@ -127,6 +127,7 @@ type
     grab: FPoint             # pointer minus toolbarPlace when that drag started
     passthrough: bool    # click-through: only the toolbar still takes the pointer
     board: Board
+    boardHint: bool      # the AI put the board up: say how to get back to the desktop
     drawingOn: Overlay   # overlay that owns the drag in progress (drawing or erasing)
     dragTool: Tool       # tool of that drag: the eraser for a right drag
     dragButton: uint8
@@ -354,6 +355,15 @@ proc render(app: App, overlay: Overlay) =
     renderer.draw(overlay.toolbar)
   if app.selecting and not app.capturing:
     app.drawSelection(overlay)
+  if app.boardHint and not app.capturing and textAvailable():
+    let key = if app.board == Whiteboard: "Ctrl+W" else: "Ctrl+B"
+    let hint = key & "  back to your desktop     Esc  close"
+    let size = measureText(hint, TooltipSize)
+    let at = FPoint(x: round((overlay.width - size.x) / 2), y: overlay.height - size.y - 28)
+    overlay.renderer.drawBackdrop(FRect(x: at.x - 8, y: at.y - 4, w: size.x + 16, h: size.y + 8),
+      overlay.mesh.pixelSize)
+    discard overlay.renderer.drawText(overlay.texts, hint, at, TooltipSize, TextColor, false,
+      overlay.scale)
   let overToolbar = toolbarShown and overlay.pointer in overlay.toolbar.bounds
   if overlay.pointerInside and not overlay.scene.drawing and not overToolbar and
       not (app.passthrough or app.capturing):
@@ -636,6 +646,7 @@ proc handleKey(app: var App, event: KeyboardEvent) =
     if ctrl:   # Ctrl+W whiteboard, Ctrl+B blackboard; the same key again goes back
       let board = if event.key == SDLK_W: Whiteboard else: Blackboard
       app.board = if app.board == board: Transparent else: board
+      app.boardHint = false
       app.markAllDirty()
   of SDLK_Y:
     if ctrl and target != nil:
@@ -785,6 +796,7 @@ proc hideOverlays(app: var App) =
   app.help = false
   app.passthrough = false
   app.board = Transparent   # the next session starts over the desktop again
+  app.boardHint = false
   app.selecting = false
   app.selectOn = nil
   app.aiOrder.setLen(0)
@@ -923,6 +935,11 @@ proc answer(app: var App, command: Command, parameters: GVariant): GVariant =
       else: raise newException(ValueError, "Board must be none, whiteboard or blackboard.")
     app.openForAi()
     app.board = board
+    # A board hides the screen, so click-through has nothing to offer: the keyboard
+    # comes to Inkpane, where Ctrl+W / Ctrl+B and Esc work, and a hint says so.
+    app.boardHint = board != Transparent
+    if app.boardHint and app.passthrough:
+      app.setPassthrough(false)
     app.markAllDirty()
   of CmdCapture:
     var monitor, width, height: int32

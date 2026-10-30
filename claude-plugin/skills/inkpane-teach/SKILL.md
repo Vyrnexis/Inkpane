@@ -84,21 +84,40 @@ off. So:
 ## Whiteboard explanations
 
 For ideas no app shows (how data flows, what a git branch is, how DNS resolves a name),
-`set_board` to `"whiteboard"` and draw the diagram **in the order you explain it**:
+put up a board with `set_board` (`"whiteboard"`, or `"blackboard"` if the user prefers
+dark). **The board hides the whole screen, including your chat with the user**, so the
+board must teach on its own: the user reads it, not the chat. Their keyboard goes to
+Inkpane, and a hint at the bottom tells them how to get back (Ctrl+W / Ctrl+B, or Esc
+to close).
 
-- Boxes (`rectangle`) for things, with their name as the `label` (Inkpane centres it;
-  use `label_color: "black"` on the whiteboard), and `arrow` for flows.
-- Label an arrow with `add_text` beside its middle, clear of the line: above a level
-  arrow, to the side of a steep one. When two arrows run in opposite directions, keep
-  them 40+ px apart so each has room for its label.
-- Lay it out left to right or top to bottom, with plenty of space: boxes of about
-  200 × 80 px, 150+ px apart. Default text (16 px) fits about 15 characters in a
-  200 px box.
-- Draw a part, explain it in chat, then draw the next, so the user follows along.
-- Use `diamond` for decisions, `ellipse` for start/end.
-- `set_board` to `"none"` when done, to bring the desktop back (the drawing stays).
+Lay the board out as a page (the screenshot size from `screen_info`, e.g. 1568 × 656):
+
+- **Title** at the top left: `add_text`, size 26, black (white on a blackboard).
+- **Diagram** in the left two thirds: boxes (`draw` `rectangle` with the thing's name
+  as `label`, `label_color` black) and `arrow`s for flows; `diamond` for decisions,
+  `ellipse` for start and end. Boxes about 200 × 80 px, 120+ px apart, laid out left to
+  right or top to bottom. Keep 40+ px between arrows that run in opposite directions.
+- **Numbered notes** in the right third: one per step, each a sentence or two, as
+  `add_text` with `max_width` (about 380 px) so it wraps; put each note under the
+  previous one (the tool says how tall it was) with a 14 px gap. Start each note with
+  its number ("1. Your browser asks a DNS server…").
+- **Step markers** on the diagram (`add_step_marker`, blue) next to the arrow or box
+  each note explains, so the numbers tie the two together.
+- One short **summary** line at the bottom of the notes if it helps ("In short: …").
+
+Build it **in teaching order**: draw a part, write its note, then the next part. The
+user watches it grow, like a teacher at a board. Use black for text and boxes, and keep
+colour for meaning (green: the flow you're following, blue: markers, red: what goes
+wrong).
+
+In the chat, say just one line, such as "The diagram is on your whiteboard. Press
+Ctrl+W to get back to your desktop." The explanation lives on the board. When the user
+comes back with questions, you can add to the same board or `clear` it and draw again.
 
 The whiteboard needs no screenshots, so it works even if the user declined them.
+
+Write text with plain characters: the user's font may lack symbols such as arrows,
+ticks or emoji (Inkpane turns → into ->). Draw an arrow instead of typing one.
 
 ## When something goes wrong
 
