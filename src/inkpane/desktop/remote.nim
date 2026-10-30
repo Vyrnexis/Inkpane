@@ -12,8 +12,6 @@ import portal
 # selects the monitors; nothing ever reads those streams.
 
 const
-  PortalBusName = "org.freedesktop.portal.Desktop"
-  PortalObjectPath = "/org/freedesktop/portal/desktop"
   RemoteInterface = "org.freedesktop.portal.RemoteDesktop"
   CastInterface = "org.freedesktop.portal.ScreenCast"
   StartTimeoutSeconds = 120   # the user may be reading the permission dialog
@@ -41,26 +39,13 @@ proc lookupPair(dict: GVariant, key: string): (int, int) =
   (int(a), int(b))
 
 proc close*(session: RemoteSession) =
-  try:
-    g_variant_unref(call(PortalBusName, session.handle, "org.freedesktop.portal.Session", "Close"))
-  except DBusError:
-    discard
+  closeSession(session.handle)
 
 proc start*(): RemoteSession =
   ## Asks the desktop for pointer and keyboard control of every monitor; may show its
   ## permission dialog. Raises PortalError when refused.
-  let created = portalRequest(RemoteInterface, "CreateSession", StartTimeoutSeconds,
-    proc(token: string): GVariant =
-      let options = newOptions(token)
-      options.addString("session_handle_token", newToken())
-      g_variant_new("(@a{sv})", options.finish()))
-  let handleValue = g_variant_lookup_value(created, "session_handle", variantType("s"))
-  g_variant_unref(created)
-  if handleValue.isNil:
-    raise newException(PortalError, "The desktop portal did not return a session.")
-  result = RemoteSession(handle: $g_variant_get_string(handleValue, nil))
-  g_variant_unref(handleValue)
-  let handle = result.handle
+  let handle = createSession(RemoteInterface, StartTimeoutSeconds)
+  result = RemoteSession(handle: handle)
   try:
     g_variant_unref(portalRequest(RemoteInterface, "SelectDevices", StartTimeoutSeconds,
       proc(token: string): GVariant =
@@ -138,7 +123,7 @@ proc evdevCode*(name: string): int =
   for (n, code) in EvdevKeys:
     if lower == n:
       return code
-  if lower.len >= 2 and lower[0] == 'f' and lower[1 .. ^1].allCharsInSet(Digits):
+  if lower.len in 2 .. 3 and lower[0] == 'f' and lower[1 .. ^1].allCharsInSet(Digits):
     let n = parseInt(lower[1 .. ^1])
     if n in 1 .. 10:
       return 58 + n

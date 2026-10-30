@@ -26,7 +26,7 @@ type
     points*: seq[FPoint]  # pen: the path; shapes: [start, end] of the drag
     filled*: bool         # rectangle, diamond, ellipse: solid inside
     text*: string         # text: what was typed; marker: its number
-    byAi*: bool           # drawn through the MCP server, not by hand
+    aiGroup*: int         # the AI's Draw or DrawMany call it came from (1, 2, …); 0 by hand
 
   Change = object
     ## One undo step: `count` items from `index` on (one drawn or erased item, or all of
@@ -240,12 +240,12 @@ proc addItem*(scene: var Scene, item: Item) =
   scene.redoStack.setLen(0)
 
 proc addMarker*(scene: var Scene, center: FPoint, radius: float32, color: FColor,
-    byAi = false, number = 0) =
+    aiGroup = 0, number = 0) =
   ## Numbered from 1 on, or `number` when given (a tutorial's step 3 stays 3).
   let shown = if number > 0: number else: scene.nextMarker
   scene.addItem(Item(kind: Marker, color: color, width: radius * 2, text: $shown,
     points: @[FPoint(x: center.x - radius, y: center.y - radius),
-              FPoint(x: center.x + radius, y: center.y + radius)], byAi: byAi))
+              FPoint(x: center.x + radius, y: center.y + radius)], aiGroup: aiGroup))
 
 ############################
 # Eraser
@@ -320,25 +320,25 @@ proc eraseAlong*(scene: var Scene, a, b: FPoint): bool =
 # Drawn by the AI
 ############################
 
-proc aiItem*(kind: Tool, points: seq[FPoint], color: FColor, width: float32, filled = false,
-    text = ""): Item =
+proc aiItem*(kind: Tool, points: seq[FPoint], color: FColor, width: float32, group: int,
+    filled = false, text = ""): Item =
   ## An item as the MCP server describes it: shapes by two corners, arrows and lines by
   ## tail and head, the pen by its path, text by its top-left corner.
-  Item(kind: kind, color: toolColor(kind, color), width: toolWidth(kind, width), byAi: true,
+  Item(kind: kind, color: toolColor(kind, color), width: toolWidth(kind, width), aiGroup: group,
     points: (if kind == Text: @[points[0], points[0]] else: points),
     filled: filled and kind in Fillable, text: text)
 
-proc lastAi*(scene: Scene): int =
-  ## Index of the newest AI item, or -1.
-  for i in countdown(scene.items.high - ord(scene.drawing), 0):
-    if scene.items[i].byAi:
-      return i
-  -1
+proc newestAiGroup*(scene: Scene): int =
+  ## The group of the AI's newest call still on screen; 0 when none is.
+  for item in scene.items:
+    result = max(result, item.aiGroup)
 
-proc clearAi*(scene: var Scene): bool =
-  ## Removes every AI item, the user's drawing stays; each is an undo step.
+proc clearAi*(scene: var Scene, group = 0): bool =
+  ## Removes the AI's items of `group`, or all of them for 0; the user's drawing stays.
+  ## Each removal is an undo step.
   for i in countdown(scene.items.high - ord(scene.drawing), 0):
-    if scene.items[i].byAi:
+    let item = scene.items[i].aiGroup
+    if item > 0 and group in [0, item]:
       scene.removeAt(i)
       result = true
 

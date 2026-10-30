@@ -1,7 +1,8 @@
 import std/posix
 
-# Runs a helper program (fc-match, wl-copy) with plain fork and exec. Nim's osproc does
-# much more than Inkpane needs and is a sizeable part of a small binary.
+# Runs helper programs (fc-match, wl-copy, wl-paste) and starts Inkpane for inkpane-mcp,
+# with plain fork and exec. Nim's osproc does much more than Inkpane needs and is a
+# sizeable part of a small binary.
 
 proc run*(args: openArray[string], input = "", output = false): tuple[code: int, text: string] =
   ## Runs args[0], found on PATH, with `input` on its stdin; with `output`, collects its
@@ -55,3 +56,23 @@ proc run*(args: openArray[string], input = "", output = false): tuple[code: int,
     result.code = -1
   else:
     result.code = WEXITSTATUS(status)
+
+proc detach*(args: openArray[string]): bool =
+  ## Starts args[0], found on PATH, in its own session so it outlives us; false when it
+  ## could not be started. The middle child exits at once, so nothing is left to reap.
+  ## Its stdin, stdout and stderr are /dev/null: never our pipes, which close when we exit.
+  let argv = allocCStringArray(args)
+  defer: deallocCStringArray(argv)
+  let pid = fork()
+  if pid == 0:
+    discard setsid()
+    if fork() == 0:
+      let null = open("/dev/null", O_RDWR)
+      for fd in 0.cint .. 2.cint:
+        discard dup2(null, fd)
+      if null > 2: discard close(null)
+      discard execvp(argv[0], argv)
+      exitnow(127)
+    exitnow(0)
+  var status: cint
+  pid > 0 and waitpid(pid, status, 0) == pid

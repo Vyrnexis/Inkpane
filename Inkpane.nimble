@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.2.0"
+version       = "0.2.1"
 author        = "Vyrnexis"
 description   = "Draw on your screen through a transparent Wayland overlay"
 license       = "GPL-3.0-or-later"
@@ -19,7 +19,7 @@ task Release, "Build small, stripped binaries into ./bin":
   mkDir("bin")
   # -Os + link-time optimisation + strip: about half the size of plain -d:release.
   # Drawing runs on the GPU, so optimising for size costs nothing noticeable.
-  const flags = "nim c -d:release --opt:size --passC:-flto --passL:-flto --passL:-s "
+  const flags = "nim c -d:release --opt:size -d:lto -d:strip "
   exec flags & "--out:bin/inkpane src/inkpane.nim"
   exec flags & "--out:bin/inkpane-mcp src/inkpane_mcp.nim"
 

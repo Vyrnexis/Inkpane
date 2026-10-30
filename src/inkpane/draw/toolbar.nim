@@ -183,6 +183,12 @@ proc scaled(c: FPoint, points: openArray[(float32, float32)]): seq[FPoint] =
 proc lines(mesh: var Mesh, c: FPoint, points: openArray[(float32, float32)]) =
   mesh.addPath(scaled(c, points), IconStroke, IconColor)
 
+proc ring(radius: float32, dy = 0'f32, segments = 24): seq[(float32, float32)] =
+  ## A closed circle in icon units, centred `dy` below the middle.
+  for i in 0 .. segments:
+    let angle = float32(i) / float32(segments) * 2 * float32(PI)
+    result.add((cos(angle) * radius, dy + sin(angle) * radius))
+
 proc addIcon(mesh: var Mesh, tool: Tool, c: FPoint) =
   case tool
   of Rectangle:
@@ -190,11 +196,7 @@ proc addIcon(mesh: var Mesh, tool: Tool, c: FPoint) =
   of Diamond:
     mesh.lines(c, [(0'f32, -0.9'f32), (0.9, 0), (0, 0.9), (-0.9, 0), (0, -0.9)])
   of Ellipse:
-    var ring: seq[(float32, float32)]
-    for i in 0 .. 24:
-      let angle = float32(i) / 24 * 2 * float32(PI)
-      ring.add((cos(angle) * 0.85'f32, sin(angle) * 0.85'f32))
-    mesh.lines(c, ring)
+    mesh.lines(c, ring(0.85))
   of Arrow:
     mesh.lines(c, [(-0.8'f32, 0.8'f32), (0.8, -0.8)])
     mesh.lines(c, [(0.0'f32, -0.8'f32), (0.8, -0.8), (0.8, 0.0)])
@@ -212,11 +214,7 @@ proc addIcon(mesh: var Mesh, tool: Tool, c: FPoint) =
     mesh.lines(c, [(-0.7'f32, 0.85'f32), (0.0, -0.85), (0.7, 0.85)])
     mesh.lines(c, [(-0.42'f32, 0.25'f32), (0.42, 0.25)])
   of Marker:
-    var ring: seq[(float32, float32)]
-    for i in 0 .. 24:
-      let angle = float32(i) / 24 * 2 * float32(PI)
-      ring.add((cos(angle) * 0.9'f32, sin(angle) * 0.9'f32))
-    mesh.lines(c, ring)
+    mesh.lines(c, ring(0.9))
     mesh.lines(c, [(-0.22'f32, -0.3'f32), (0.05, -0.48), (0.05, 0.48)])
   of Eraser:
     mesh.lines(c, [(-0.85'f32, 0.2'f32), (0.0, -0.65), (0.65, 0.0), (-0.2, 0.85), (-0.85, 0.2)])
@@ -306,11 +304,7 @@ proc build(toolbar: var Toolbar, state: ToolbarState, palette: openArray[FColor]
     of CaptureButton:   # camera: body with a bump on top, and the lens
       mesh.lines(c, [(-0.9'f32, -0.45'f32), (-0.35, -0.45), (-0.2, -0.75), (0.2, -0.75),
                      (0.35, -0.45), (0.9, -0.45), (0.9, 0.7), (-0.9, 0.7), (-0.9, -0.45)])
-      var lens: seq[(float32, float32)]
-      for i in 0 .. 20:
-        let angle = float32(i) / 20 * 2 * float32(PI)
-        lens.add((cos(angle) * 0.38'f32, 0.12'f32 + sin(angle) * 0.38'f32))
-      mesh.lines(c, lens)
+      mesh.lines(c, ring(0.38, 0.12, 20))
   toolbar.shown = state
   toolbar.built = true
 

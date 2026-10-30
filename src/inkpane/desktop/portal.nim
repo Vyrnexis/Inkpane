@@ -8,8 +8,8 @@ import glib
 # through Request::Response signals, which arrive while we pump the GLib main context.
 
 const
-  PortalBusName = "org.freedesktop.portal.Desktop"
-  PortalObjectPath = "/org/freedesktop/portal/desktop"
+  PortalBusName* = "org.freedesktop.portal.Desktop"
+  PortalObjectPath* = "/org/freedesktop/portal/desktop"
   GlobalShortcutsInterface = "org.freedesktop.portal.GlobalShortcuts"
   ScreenshotInterface = "org.freedesktop.portal.Screenshot"
   RequestInterface = "org.freedesktop.portal.Request"
@@ -35,6 +35,7 @@ type
 
 var
   subscribed: bool
+  requestPrefix: string   # our requests' object paths start with this
   pendingResponses: Table[string, PortalResponse]
   activatedShortcuts: seq[tuple[session, id: string]]
   tokenCounter: int
@@ -46,10 +47,13 @@ var
 proc onRequestResponse(connection: GDBusConnection,
     senderName, objectPath, interfaceName, signalName: cstring,
     parameters: GVariant, userData: pointer) {.cdecl.} =
+  let path = $objectPath
+  if not path.startsWith(requestPrefix):
+    return   # another app's request
   var code: uint32
   var results: GVariant
   g_variant_get(parameters, "(u@a{sv})", addr code, addr results)
-  pendingResponses[$objectPath] = PortalResponse(code: code, results: results)
+  pendingResponses[path] = PortalResponse(code: code, results: results)
 
 proc onShortcutActivated(connection: GDBusConnection,
     senderName, objectPath, interfaceName, signalName: cstring,
@@ -68,6 +72,8 @@ proc ensureSubscribed() =
   if subscribed:
     return
   registerAppId()
+  let sender = uniqueName().strip(chars = {':'}, trailing = false).replace(".", "_")
+  requestPrefix = PortalObjectPath & "/request/" & sender & "/"
   subscribe(PortalBusName, RequestInterface, "Response", "", "", onRequestResponse)
   subscribe(PortalBusName, GlobalShortcutsInterface, "Activated", PortalObjectPath, "", onShortcutActivated)
   subscribed = true
@@ -93,8 +99,7 @@ proc portalRequest*(interfaceName, methodName: string, timeoutSeconds: int,
   # Returns the a{sv} results of a successful request; the caller must unref them.
   ensureSubscribed()
   let token = newToken()
-  let sender = uniqueName().strip(chars = {':'}, trailing = false).replace(".", "_")
-  let expectedPath = PortalObjectPath & "/request/" & sender & "/" & token
+  let expectedPath = requestPrefix & token
   let reply =
     try:
       call(PortalBusName, PortalObjectPath, interfaceName, methodName, buildParameters(token))
@@ -146,26 +151,30 @@ proc globalShortcutsAvailable*(): bool =
   except DBusError:
     false
 
-proc closeSession(handle: string) =
+proc closeSession*(handle: string) =
   try:
     g_variant_unref(call(PortalBusName, handle, SessionInterface, "Close"))
   except DBusError:
     discard
 
+proc createSession*(interfaceName: string, timeoutSeconds: int): string =
+  ## A new portal session of `interfaceName`; returns its handle.
+  let created = portalRequest(interfaceName, "CreateSession", timeoutSeconds,
+    proc(token: string): GVariant =
+      let options = newOptions(token)
+      options.addString("session_handle_token", newToken())
+      g_variant_new("(@a{sv})", options.finish()))
+  let handleValue = g_variant_lookup_value(created, "session_handle", variantType("s"))
+  g_variant_unref(created)
+  if handleValue.isNil:
+    raise newException(PortalError, "The desktop portal did not return a session.")
+  result = $g_variant_get_string(handleValue, nil)
+  g_variant_unref(handleValue)
+
 proc bindShortcuts*(bindings: openArray[ShortcutBinding]): ShortcutSession =
   ## The desktop owns the final key assignment; triggers are suggestions it may show
   ## in a confirmation dialog the first time.
-  let createResults = portalRequest(GlobalShortcutsInterface, "CreateSession",
-      InteractiveTimeoutSeconds, proc(token: string): GVariant =
-    let options = newOptions(token)
-    options.addString("session_handle_token", newToken())
-    g_variant_new("(@a{sv})", options.finish()))
-  let handleValue = g_variant_lookup_value(createResults, "session_handle", variantType("s"))
-  g_variant_unref(createResults)
-  if handleValue.isNil:
-    raise newException(PortalError, "The desktop portal did not return a session.")
-  let sessionHandle = $g_variant_get_string(handleValue, nil)
-  g_variant_unref(handleValue)
+  let sessionHandle = createSession(GlobalShortcutsInterface, InteractiveTimeoutSeconds)
 
   let shortcutList = @bindings
   result = ShortcutSession(sessionHandle: sessionHandle)

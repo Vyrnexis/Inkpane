@@ -102,7 +102,7 @@ proc toColor(color: FColor): Color =
   Color(r: uint8(color.r * 255), g: uint8(color.g * 255), b: uint8(color.b * 255),
         a: uint8(color.a * 255))
 
-proc haloFor*(color: FColor): FColor =
+proc haloFor(color: FColor): FColor =
   ## A dark halo behind light text and a light one behind dark text.
   let light = color.r * 0.3 + color.g * 0.59 + color.b * 0.11 > 0.5
   if light: FColor(r: 0, g: 0, b: 0, a: 0.75) else: FColor(r: 1, g: 1, b: 1, a: 0.85)
@@ -136,7 +136,8 @@ proc drawText*(renderer: Renderer, cache: var TextCache, text: string, topLeft: 
   ## Draws `text` with its first line's top-left at `topLeft` (logical px); returns its size.
   let pixels = pixelsFor(size * scale)
   let key = text & "\0" & $pixels & $color & $halo
-  if key notin cache.entries:
+  var entry = cache.entries.getOrDefault(key)
+  if entry.texture == nil:
     let surface = renderSurface(text, pixels, color, halo)
     if surface == nil:
       return
@@ -145,9 +146,9 @@ proc drawText*(renderer: Renderer, cache: var TextCache, text: string, topLeft: 
     destroySurface(surface)
     if texture == nil:
       return
-    cache.entries[key] = CachedText(texture: texture, size: size)
-  cache.entries[key].used = true
-  let entry = cache.entries[key]
+    entry = CachedText(texture: texture, size: size)
+  entry.used = true
+  cache.entries[key] = entry
   let inset = if halo: float32(outlineFor(pixels)) / scale else: 0
   var target = FRect(x: topLeft.x - inset, y: topLeft.y - inset, w: entry.size.x, h: entry.size.y)
   discard renderer.renderTexture(entry.texture, nil, target.addr)

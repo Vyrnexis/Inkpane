@@ -1,6 +1,7 @@
-import std/[base64, json, math, os, osproc, sequtils, streams, strutils, unicode]
+import std/[base64, json, math, os, sequtils, strutils, unicode]
 
 import inkpane/desktop/[dbus, glib, remote]
+import inkpane/spawn
 
 # inkpane-mcp: an MCP server (newline-delimited JSON-RPC 2.0 on stdio) that lets an AI
 # client draw on the user's screen and take screenshots by calling the running Inkpane
@@ -65,11 +66,8 @@ proc ensureRunning() =
   if not fileExists(exe):
     exe = findExe("inkpane")
   if exe.len > 0:
-    try:
-      # poDaemon detaches it, so it outlives this server.
-      discard startProcess(exe, options = {poDaemon})
-    except CatchableError:
-      stderr.writeLine("inkpane-mcp: could not start " & exe & ": " & getCurrentExceptionMsg())
+    if not detach([exe]):
+      stderr.writeLine("inkpane-mcp: could not start " & exe)
     for _ in 1 .. 50:
       sleep(100)
       if running():
@@ -651,16 +649,7 @@ proc pressCodes(codes: openArray[int]) =
     sleep(15)
 
 proc wlCopy(text: string, clear = false): bool =
-  try:
-    let process = startProcess("wl-copy", args = (if clear: @["--clear"] else: @["--type", "text/plain"]),
-      options = {poUsePath})
-    if not clear:
-      process.inputStream.write(text)
-    process.inputStream.close()
-    result = process.waitForExit() == 0
-    process.close()
-  except OSError, IOError:
-    discard
+  run(if clear: @["wl-copy", "--clear"] else: @["wl-copy", "--type", "text/plain"], text).code == 0
 
 proc pasteText(s, keys: string): bool =
   ## Types by pasting: KWin's keysym input applies Shift a key late ("3:45" became
@@ -668,7 +657,7 @@ proc pasteText(s, keys: string): bool =
   ## clipboard is put back afterwards.
   if findExe("wl-copy").len == 0 or findExe("wl-paste").len == 0:
     return false
-  let (saved, savedCode) = execCmdEx("wl-paste --no-newline --type text/plain")
+  let (savedCode, saved) = run(["wl-paste", "--no-newline", "--type", "text/plain"], output = true)
   if not wlCopy(s):
     return false
   sleep(80)
@@ -932,7 +921,7 @@ proc handle(request: JsonNode) =
         params["protocolVersion"].kind == JString and params["protocolVersion"].getStr in Versions:
       version = params["protocolVersion"].getStr
     result = %*{"protocolVersion": version, "capabilities": {"tools": {}},
-      "serverInfo": {"name": "inkpane", "version": "0.2.0"}, "instructions": Instructions}
+      "serverInfo": {"name": "inkpane", "version": "0.2.1"}, "instructions": Instructions}
   of "ping":
     result = newJObject()
   of "tools/list":

@@ -49,7 +49,7 @@ proc onBackground*(color, background: FColor): FColor =
 proc shown*(item: Item, background: FColor): FColor =
   ## The colour an item is drawn in. An AI picks its colours for the board on purpose
   ## (light tints on a whiteboard), so only hand-drawn items get auto-contrast.
-  if item.byAi: item.color else: item.color.onBackground(background)
+  if item.aiGroup > 0: item.color else: item.color.onBackground(background)
 
 proc setBackground*(mesh: var Mesh, background: FColor) =
   ## Called when the board changes; the next update rebuilds the mesh in its colours.
