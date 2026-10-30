@@ -3,7 +3,7 @@
 version       = "0.0.1"
 author        = "Vyrnexis"
 description   = "Draw on your screen through a transparent Wayland overlay"
-license       = "MIT"
+license       = "GPL-3.0-or-later"
 srcDir        = "src"
 binDir        = "bin"
 bin           = @["inkpane", "inkpane_mcp"]

@@ -8,6 +8,6 @@
   },
   "homepage": "https://github.com/Vyrnexis/Inkpane",
   "repository": "https://github.com/Vyrnexis/Inkpane",
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "keywords": ["wayland", "annotation", "teaching", "screenshot", "mcp"]
 }

@@ -122,5 +122,8 @@ used.
 
 ## License
 
-MIT. The Wayland protocol XML files in `src/inkpane/wayland/protocols/` keep their own
-licences.
+Copyright (C) 2026 Vyrnexis. Inkpane is free software under the
+[GNU General Public License v3.0 or later](LICENSE): you may use, study, share and change
+it, and anything built from it must stay free under the same terms. The Wayland protocol
+XML files in `src/inkpane/wayland/protocols/` (and the code generated from them) keep
+their own licences.
