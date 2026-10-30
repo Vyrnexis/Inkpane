@@ -95,6 +95,10 @@ proc updateRenderScale*(overlay: Overlay) =
 proc closedByCompositor*(overlay: Overlay): bool =
   overlay.layer.closed
 
+proc waylandFd*(): cint =
+  ## SDL's Wayland connection, for waiting on it while no overlay (and so no SDL window) exists.
+  displayFd(getGlobalProperties().getPointerProperty(PROP_GLOBAL_VIDEO_WAYLAND_WL_DISPLAY_POINTER, nil))
+
 proc close*(overlay: Overlay) =
   if overlay.renderer != nil:
     destroyRenderer(overlay.renderer)

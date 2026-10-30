@@ -1,4 +1,4 @@
-import std/[math, parseopt, strutils, tables, times]
+import std/[math, parseopt, posix, strutils, tables, times]
 
 import sdl3
 
@@ -42,7 +42,7 @@ const
 
   ToggleShortcutId = "toggle-drawing"
   DefaultShortcutHint = "Meta+Z"
-  IdleWaitMs = 50'i32      # how often D-Bus is serviced while nothing else happens
+  DrawingWaitMs = 50'i32   # while drawing, how often D-Bus (tray, shortcut) is serviced
 
 type
   Command = enum
@@ -59,7 +59,6 @@ type
     drawingOn: Overlay   # overlay that owns the stroke in progress
     running: bool
     shortcuts: ShortcutSession
-    shortcutsRequested: bool
 
 var pendingCommands: seq[Command]   # filled by D-Bus callbacks, drained by the main loop
 
@@ -228,7 +227,6 @@ proc serviceMethod(methodName: string, parameters: GVariant, invocation: pointer
 
 proc bindToggleShortcut(app: var App) =
   # May show the desktop's shortcut confirmation dialog the first time.
-  app.shortcutsRequested = true
   if not globalShortcutsAvailable():
     setTrayShortcutHint("")
     return
@@ -254,6 +252,17 @@ proc collectCommands(app: var App) =
   pendingCommands.setLen(0)
   for command in commands:
     app.runCommand(command)
+
+proc onWaylandReadable(fd: cint, condition: cuint, data: pointer): cint {.cdecl.} =
+  # Only wakes the idle loop; SDL reads the events. A hang-up means the compositor is gone.
+  if (condition and (GIoErr or GIoHup)) != 0:
+    pendingCommands.add(CmdQuit)
+    return 0
+  1
+
+proc onQuitSignal(data: pointer): cint {.cdecl.} =
+  pendingCommands.add(CmdQuit)
+  1
 
 proc forwardToRunningInstance(command: Command): int =
   # Another Nimotate owns the bus name: pass the request on and exit.
@@ -323,6 +332,7 @@ proc run(): int =
     echo "nimotate: not running"
     return 0
 
+  discard setHint(HINT_NO_SIGNAL_HANDLERS, "1")   # GLib handles SIGINT/SIGTERM below
   if not init(INIT_VIDEO):
     echo "nimotate: SDL init failed: ", getError()
     return 1
@@ -343,19 +353,26 @@ proc run(): int =
       app.overlays[0].addDemoStroke()
   elif command in {CmdShow, CmdToggle}:
     app.showOverlays()
-  let startedAt = epochTime()
+  app.bindToggleShortcut()
 
+  # With no overlay there is no SDL window, and SDL can then only busy-poll for events.
+  # So while idle, sleep in GLib instead: D-Bus, the Wayland socket and quit signals wake it.
+  discard g_unix_fd_add(waylandFd(), GIoIn or GIoErr or GIoHup, onWaylandReadable, nil)
+  for signal in [SIGINT, SIGTERM]:
+    discard g_unix_signal_add(signal, onQuitSignal, nil)
+
+  let startedAt = epochTime()
   var event: Event
   while app.running:
     if exitAfter > 0 and epochTime() - startedAt >= exitAfter:
       break
-    # Sleep until input arrives, waking regularly to service D-Bus (tray, shortcut).
-    if waitEventTimeout(event, IdleWaitMs):
-      app.handleEvent(event)
-      while pollEvent(event):
+    if app.drawing:
+      if waitEventTimeout(event, DrawingWaitMs):
         app.handleEvent(event)
-    if not app.shortcutsRequested:
-      app.bindToggleShortcut()
+    else:
+      dbus.wait()
+    while pollEvent(event):
+      app.handleEvent(event)
     app.collectCommands()
     for overlay in app.overlays:
       if overlay.closedByCompositor():

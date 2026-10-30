@@ -17,9 +17,14 @@ proc layerClosed(layer: LayerHandle): cint {.importc: "nimotate_layer_closed", c
 proc layerWidth(layer: LayerHandle): cuint {.importc: "nimotate_layer_width", cdecl.}
 proc layerHeight(layer: LayerHandle): cuint {.importc: "nimotate_layer_height", cdecl.}
 proc layerDestroy(layer: LayerHandle) {.importc: "nimotate_layer_destroy", cdecl.}
+proc wl_display_get_fd(display: pointer): cint {.importc, cdecl.}
 
 proc isNil*(layer: LayerHandle): bool =
   pointer(layer).isNil
+
+proc displayFd*(display: pointer): cint =
+  ## The Wayland socket; readable whenever the compositor sent something.
+  wl_display_get_fd(display)
 
 proc initLayerShell*(display: pointer): bool =
   ## Binds zwlr_layer_shell_v1. False means the compositor has no layer-shell (e.g. GNOME).

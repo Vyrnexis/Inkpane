@@ -69,6 +69,10 @@ proc pump*() =
   while g_main_context_iteration(nil, 0) != 0:
     discard
 
+proc wait*() =
+  ## Sleep until a GLib source (D-Bus, a watched fd, a signal) has work, then dispatch it.
+  discard g_main_context_iteration(nil, 1)
+
 ############################
 # Calls and Signals
 ############################

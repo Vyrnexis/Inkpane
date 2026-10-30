@@ -15,6 +15,9 @@ const
   GDBusConnectionFlagsMessageBusConnection* = cint(8)
   GDBusCallFlagsNone* = cint(0)
   GDBusSignalFlagsNone* = cint(0)
+  GIoIn* = cuint(1)
+  GIoErr* = cuint(8)
+  GIoHup* = cuint(16)
 
 type
   GError* {.bycopy.} = object
@@ -49,6 +52,7 @@ type
     padding: array[8, pointer]
 
   GSourceFunc* = proc(userData: pointer): cint {.cdecl.}   # return 0 to remove the source
+  GUnixFDSourceFunc* = proc(fd: cint, condition: cuint, userData: pointer): cint {.cdecl.}
 
   GDBusSignalCallback* = proc(
     connection: GDBusConnection,
@@ -66,6 +70,8 @@ proc g_error_free*(error: ptr GError) {.cdecl, importc, dynlib: glibLib.}
 proc g_main_context_iteration*(context: pointer, mayBlock: cint): cint {.cdecl, importc, dynlib: glibLib.}
 proc g_timeout_add_seconds*(interval: cuint, function: GSourceFunc, data: pointer): cuint {.cdecl, importc, dynlib: glibLib.}
 proc g_source_remove*(tag: cuint): cint {.cdecl, importc, dynlib: glibLib.}
+proc g_unix_fd_add*(fd: cint, condition: cuint, function: GUnixFDSourceFunc, data: pointer): cuint {.cdecl, importc, dynlib: glibLib.}
+proc g_unix_signal_add*(signum: cint, handler: GSourceFunc, data: pointer): cuint {.cdecl, importc, dynlib: glibLib.}
 proc g_object_unref*(obj: pointer) {.cdecl, importc, dynlib: gobjectLib.}
 
 ############################
