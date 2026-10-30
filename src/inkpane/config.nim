@@ -32,7 +32,7 @@ tool = pen
 fill = no
 
 [toolbar]
-# Show the toolbar at start (Tab toggles it). Drag its background to move it.
+# Show the toolbar at start (Tab toggles it). Drag it by the dots at its left end.
 visible = yes
 
 [text]

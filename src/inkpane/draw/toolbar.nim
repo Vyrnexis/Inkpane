@@ -5,7 +5,7 @@ import sdl3
 import render, scene
 
 # Floating strip at the top centre of each monitor (or wherever it was dragged):
-# click-through, tools, fill, colours, widths, screenshot.
+# a grip to drag it by, click-through, tools, fill, colours, widths, screenshot.
 # Icons and key digits are drawn as lines with the same mesh code as the drawing, so the
 # toolbar needs no font and no image files. The mesh is rebuilt only when what the
 # toolbar shows (tool, colour, width, fill, hovered button) changes.
@@ -28,6 +28,7 @@ const
     "Diamond", "Ellipse", "Text", "Step marker", "Eraser"]
 
   ButtonSize = 36'f32
+  GripWidth = 16'f32
   ColorButtonWidth = 28'f32
   Padding = 6'f32
   GroupGap = 13'f32      # between groups, with a separator line in the middle
@@ -49,7 +50,7 @@ const
 
 type
   ButtonKind* = enum
-    PassButton, ToolButton, FillButton, ColorButton, WidthButton, CaptureButton
+    GripButton, PassButton, ToolButton, FillButton, ColorButton, WidthButton, CaptureButton
 
   Button* = object
     kind*: ButtonKind
@@ -100,6 +101,7 @@ proc layout(toolbar: var Toolbar, screen, place: FPoint, colors: int) =
   template separate() =
     toolbar.separators.add(x + GroupGap / 2)
     x += GroupGap
+  add(GripButton, 0, GripWidth)
   add(PassButton, 0, ButtonSize)
   for i in 0 .. ToolOrder.high:
     add(ToolButton, i, ButtonSize)
@@ -134,6 +136,7 @@ proc offset*(toolbar: Toolbar): FPoint =
 proc label*(toolbar: Toolbar, button: Button): string =
   ## Tooltip: what the button does and its keys.
   case button.kind
+  of GripButton: "Drag to move"
   of PassButton: "Click-through   1 · V"
   of ToolButton:
     let key = ToolOrder[button.index]
@@ -240,6 +243,7 @@ proc addDigit(mesh: var Mesh, digit: int, topLeft: FPoint) =
 
 proc selected(toolbar: Toolbar, button: Button, state: ToolbarState): bool =
   case button.kind
+  of GripButton: false
   of PassButton: state.passthrough
   of ToolButton: not (state.passthrough or state.selecting) and
     ToolOrder[button.index].tool == state.tool
@@ -264,6 +268,10 @@ proc build(toolbar: var Toolbar, state: ToolbarState, palette: openArray[FColor]
       mesh.addFill(back, HoverColor)
     let c = button.rect.center
     case button.kind
+    of GripButton:   # two columns of three dots: "drag me"
+      for dx in [-2.5'f32, 2.5]:
+        for dy in [-5'f32, 0, 5]:
+          mesh.addDisc(FPoint(x: c.x + dx, y: c.y + dy), 1.4, DigitColor)
     of PassButton:
       # Mouse cursor, as Excalidraw's select tool in the same place.
       mesh.lines(FPoint(x: c.x - 1.5, y: c.y - 1.5),

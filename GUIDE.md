@@ -220,12 +220,13 @@ tutorials. Everything about it is in [AI.md](AI.md).
 The toolbar floats at the top centre of each monitor, low enough to clear a top panel:
 
 ```
- cursor │ tools … │ fill │ colours … │ widths │ camera
+ grip │ cursor │ tools … │ fill │ colours … │ widths │ camera
 ```
 
 - Click a button to pick it; the current choices are highlighted.
 - Rest the pointer on a button for its name and keys.
-- **Drag the toolbar by its background** (between the buttons) to move it anywhere.
+- **Drag the toolbar by the grip** (the six dots at its left end) to move it anywhere;
+  the space between the buttons works too.
   It stays there, also after a restart.
 - It steps out of the way while you draw near it, and comes back when you let go.
 - **Tab** hides and shows it; you can also start with it hidden (see [Settings](#settings)).
@@ -265,7 +266,7 @@ tool = pen
 fill = no
 
 [toolbar]
-# Show the toolbar at start (Tab toggles it). Drag its background to move it.
+# Show the toolbar at start (Tab toggles it). Drag it by the dots at its left end.
 visible = yes
 
 [text]

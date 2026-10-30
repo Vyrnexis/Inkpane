@@ -147,6 +147,7 @@ type
     hoverOn: Overlay     # toolbar button under the pointer, for its tooltip
     hoverButton: int
     hoverSince: uint64
+    moveCursorShown: bool
     tooltip: bool        # hovered long enough: show it
     selecting: bool      # Ctrl+S: the next drag or click picks what to capture
     selectOn: Overlay    # overlay of that drag
@@ -578,7 +579,7 @@ proc press(app: var App, button: Button) =
   if button.kind == ToolButton:
     app.startSelecting(false)
   case button.kind
-  of PassButton, CaptureButton: discard
+  of GripButton, PassButton, CaptureButton: discard
   of ToolButton: app.tool = ToolOrder[button.index].tool
   of FillButton: app.fill = not app.fill
   of ColorButton: app.color = app.settings.palette[button.index]
@@ -706,12 +707,12 @@ proc handleEvent(app: var App, event: Event) =
       let point = FPoint(x: event.button.x, y: event.button.y)
       app.stopTyping(keep = true)   # a click anywhere finishes the text being typed
       let pressed = app.toolbarHit(overlay)
-      if pressed >= 0:
+      if pressed >= 0 and overlay.toolbar.buttons[pressed].kind != GripButton:
         if int(button) == BUTTON_LEFT:
           app.press(overlay.toolbar.buttons[pressed])
         return
       if not app.hideToolbar and point in overlay.toolbar.bounds:
-        if int(button) == BUTTON_LEFT:   # the background between buttons is the handle
+        if int(button) == BUTTON_LEFT:   # the grip, or the background between buttons
           app.movingToolbar = overlay
           app.grab = FPoint(x: point.x - app.toolbarPlace.x, y: point.y - app.toolbarPlace.y)
         return
@@ -801,6 +802,7 @@ proc hideOverlays(app: var App) =
   app.overlays.setLen(0)
   app.drawingOn = nil
   app.typingOn = nil
+  app.movingToolbar = nil
   app.hoverOn = nil
   app.tooltip = false
   app.help = false
@@ -1005,6 +1007,18 @@ proc bindToggleShortcut(app: var App) =
     notifyError("Global shortcut unavailable (" & getCurrentExceptionMsg() &
       "). Use the tray icon or `inkpane --toggle`.")
 
+var moveCursor: Cursor
+
+proc updateCursor(app: var App) =
+  ## A move cursor over the toolbar's grip and while the toolbar is dragged.
+  let grip = app.movingToolbar != nil or (app.hoverOn != nil and app.hoverButton >= 0 and
+    app.hoverOn.toolbar.buttons[app.hoverButton].kind == GripButton)
+  if grip != app.moveCursorShown:
+    app.moveCursorShown = grip
+    if grip and moveCursor == nil:
+      moveCursor = createSystemCursor(SYSTEM_CURSOR_MOVE)
+    discard setCursor(if grip: moveCursor else: getDefaultCursor())
+
 proc updateTooltip(app: var App) =
   ## A tooltip appears once the pointer rests on a toolbar button for a moment.
   var on: Overlay = nil
@@ -1149,6 +1163,7 @@ proc run(): int =
       app.handleEvent(event)
     app.collectCommands()
     app.updateTooltip()
+    app.updateCursor()
     for overlay in app.overlays:
       if overlay.closedByCompositor():
         pendingCommands.add(CmdHide)
