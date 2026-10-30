@@ -54,7 +54,9 @@ scripting and troubleshooting.
 ## Install
 
 **Arch Linux:** build the package in [`packaging/aur`](packaging/aur/PKGBUILD) with
-`makepkg -si`.
+`makepkg -sir`. Pacman's `nim` is only needed to build, and `-r` removes it again
+afterwards. If you use choosenim, your own Nim is not touched; to build with it
+instead, run `makepkg -si --nodeps`.
 
 **From source** (needs Nim 2.2+):
 
