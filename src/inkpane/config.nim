@@ -4,16 +4,16 @@ import sdl3
 
 import draw/scene
 
-# Settings the user edits by hand, in ~/.config/nimotate/nimotate.conf, and what Nimotate
-# remembers by itself (where the toolbar was dragged), in ~/.local/state/nimotate/state.
-# They are kept apart so Nimotate never rewrites the user's file or its comments.
+# Settings the user edits by hand, in ~/.config/inkpane/inkpane.conf, and what Inkpane
+# remembers by itself (where the toolbar was dragged), in ~/.local/state/inkpane/state.
+# They are kept apart so Inkpane never rewrites the user's file or its comments.
 #
 # The defaults are the commented file below: it is written out on first run and also
 # parsed first, so a missing or partial file falls back to exactly what it documents.
 
 const DefaultConfig = """
-# Nimotate settings. Delete a line to get its default back.
-# Changes apply the next time Nimotate starts.
+# Inkpane settings. Delete a line to get its default back.
+# Changes apply the next time Inkpane starts.
 
 [colors]
 # Up to 8 colours, picked with Shift+1 .. Shift+8 and shown in the toolbar.
@@ -53,13 +53,13 @@ type
     font*: string          # empty: ask fontconfig
 
 proc configPath*(): string =
-  getConfigDir() / "nimotate" / "nimotate.conf"
+  getConfigDir() / "inkpane" / "inkpane.conf"
 
 proc statePath(): string =
-  getEnv("XDG_STATE_HOME", getHomeDir() / ".local" / "state") / "nimotate" / "state"
+  getEnv("XDG_STATE_HOME", getHomeDir() / ".local" / "state") / "inkpane" / "state"
 
 proc warn(message: string) =
-  stderr.writeLine("nimotate: " & configPath() & ": " & message)
+  stderr.writeLine("inkpane: " & configPath() & ": " & message)
 
 proc parseColor(text: string): FColor =
   let hex = text.strip(chars = {'#', ' '})
@@ -164,6 +164,6 @@ proc saveToolbarPlace*(place: FPoint) =
   let path = statePath()
   try:
     createDir(path.parentDir)
-    writeFile(path, "# Written by Nimotate.\ntoolbar = \"" & $place.x & " " & $place.y & "\"\n")
+    writeFile(path, "# Written by Inkpane.\ntoolbar = \"" & $place.x & " " & $place.y & "\"\n")
   except OSError, IOError:
-    stderr.writeLine("nimotate: could not save " & path & ": " & getCurrentExceptionMsg())
+    stderr.writeLine("inkpane: could not save " & path & ": " & getCurrentExceptionMsg())

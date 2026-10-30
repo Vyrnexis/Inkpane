@@ -1,12 +1,12 @@
-# Nimotate
+# Inkpane
 
 **Draw on your screen** — for tutorials, presentations and screen recordings on Linux
 Wayland desktops. Press a key, circle the button, add an arrow and a label, click
 through to show it working, press the key again and it is gone.
 
-<p align="center"><img src="assets/demo.gif" alt="Nimotate on KDE Plasma annotating AppGlider: a highlight, a label and arrow, clicking through to the Updates page, step markers, an ellipse around Update all, and a pen underline" width="800"></p>
+<p align="center"><img src="assets/demo.gif" alt="Inkpane on KDE Plasma annotating AppGlider: a highlight, a label and arrow, clicking through to the Updates page, step markers, an ellipse around Update all, and a pen underline" width="800"></p>
 
-## Why Nimotate
+## Why Inkpane
 
 - **Small and fast.** A 240 KB program that waits in the tray at about 10 MB of memory
   and no CPU. Drawing is one cached mesh per monitor, anti-aliased, at full refresh rate.
@@ -56,15 +56,15 @@ scripting and troubleshooting.
 nimble install https://github.com/nim-lang/sdl3
 nimble Release
 scripts/install-user.sh        # or: scripts/install-user.sh --autostart
-nimotate &
+inkpane &
 ```
 
 Installing matters: the desktop only grants the Meta+Z shortcut to apps with an
 installed `.desktop` file. `scripts/uninstall-user.sh` removes everything again.
 
 The first time you press Meta+Z, KDE asks you to confirm the shortcut. On compositors
-without the shortcut portal, bind `nimotate --toggle` to a key yourself (see the
-[guide](GUIDE.md#controlling-nimotate-from-scripts)).
+without the shortcut portal, bind `inkpane --toggle` to a key yourself (see the
+[guide](GUIDE.md#controlling-inkpane-from-scripts)).
 
 ## Size and speed
 
@@ -73,7 +73,7 @@ Measured on a release build (x86-64, KDE Plasma):
 | | |
 |---|---|
 | Binary | 240 KB; links only SDL3, libwayland-client and libc |
-| Idle in the background | ~10 MB resident (~1.5 MB of it Nimotate's own), 0 % CPU |
+| Idle in the background | ~10 MB resident (~1.5 MB of it Inkpane's own), 0 % CPU |
 | Drawing | ~8 µs per pen point; one draw call per monitor per frame |
 | Undo or erase on a busy screen | under 4 ms to rebuild 30 000 points |
 
@@ -84,5 +84,5 @@ used.
 
 ## License
 
-MIT. The Wayland protocol XML files in `src/nimotate/wayland/protocols/` keep their own
+MIT. The Wayland protocol XML files in `src/inkpane/wayland/protocols/` keep their own
 licences.

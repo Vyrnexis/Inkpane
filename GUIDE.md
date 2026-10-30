@@ -1,6 +1,6 @@
-# Nimotate user guide
+# Inkpane user guide
 
-Everything Nimotate does, and how to get the most out of it. For installation see the
+Everything Inkpane does, and how to get the most out of it. For installation see the
 [README](README.md).
 
 - [The basics](#the-basics)
@@ -13,13 +13,13 @@ Everything Nimotate does, and how to get the most out of it. For installation se
 - [The toolbar](#the-toolbar)
 - [Several monitors](#several-monitors)
 - [Settings](#settings)
-- [Controlling Nimotate from scripts](#controlling-nimotate-from-scripts)
+- [Controlling Inkpane from scripts](#controlling-inkpane-from-scripts)
 - [Tips for screen recordings](#tips-for-screen-recordings)
 - [Troubleshooting](#troubleshooting)
 
 ## The basics
 
-Nimotate waits in the background with an icon in the system tray. It has three states:
+Inkpane waits in the background with an icon in the system tray. It has three states:
 
 ```
           Meta+Z                      1 / V
@@ -47,12 +47,12 @@ to save or tidy up.
 | Drawing | Close and clear |
 | Click-through | Back to drawing, drawing kept |
 
-A **left click on the tray icon** and `nimotate --toggle` do exactly the same. The tray
+A **left click on the tray icon** and `inkpane --toggle` do exactly the same. The tray
 icon's **right-click menu** has *Start Drawing* / *Stop Drawing*, which always do what
-they say, and *Quit Nimotate*.
+they say, and *Quit Inkpane*.
 
 The first time, KDE asks you to confirm the shortcut. To use another key, change it in
-System Settings → Shortcuts → Nimotate.
+System Settings → Shortcuts → Inkpane.
 
 **Esc** closes and clears from drawing mode (in click-through, Esc goes to the app you
 are using, like any other key).
@@ -61,7 +61,7 @@ are using, like any other key).
 
 Pick a tool with its number key, its letter, or the toolbar. The number keys work by
 position, so on AZERTY and other layouts it is the key where 2, 3, … would be. The keys
-follow [Excalidraw](https://excalidraw.com), so if you know it you know Nimotate.
+follow [Excalidraw](https://excalidraw.com), so if you know it you know Inkpane.
 
 | Key | Tool | Use it for |
 |---|---|---|
@@ -168,7 +168,7 @@ The toolbar is the only part of the overlay that still takes clicks in click-thr
 If you hid it (Tab) before switching, use Meta+Z to come back.
 
 Why not press 1 again? In click-through the keyboard belongs to the app you are using,
-so Nimotate cannot hear ordinary keys. Only the global shortcut and the tray reach it.
+so Inkpane cannot hear ordinary keys. Only the global shortcut and the tray reach it.
 
 ## Whiteboard and blackboard
 
@@ -197,7 +197,7 @@ The toolbar floats at the top centre of each monitor, low enough to clear a top 
 
 ## Several monitors
 
-Nimotate covers every monitor at once, each at its own scale.
+Inkpane covers every monitor at once, each at its own scale.
 
 - What you draw belongs to the monitor you drew it on.
 - **Undo and redo** work on one monitor: the one with the keyboard focus, normally the
@@ -207,9 +207,9 @@ Nimotate covers every monitor at once, each at its own scale.
 
 ## Settings
 
-The settings file is `~/.config/nimotate/nimotate.conf`. Nimotate writes it the first
+The settings file is `~/.config/inkpane/inkpane.conf`. Inkpane writes it the first
 time it starts, with every setting and a comment explaining it. Edit it with any text
-editor and restart Nimotate (`nimotate --quit`, then start it again).
+editor and restart Inkpane (`inkpane --quit`, then start it again).
 
 ```ini
 [colors]
@@ -240,35 +240,35 @@ font = ""
 
 - Delete a line to get its default back; delete the file to get a fresh, fully
   commented one.
-- A value Nimotate does not understand is reported (in the terminal, if you started it
+- A value Inkpane does not understand is reported (in the terminal, if you started it
   from one) and the default is used instead.
-- Where you dragged the toolbar is kept separately in `~/.local/state/nimotate/state`,
-  so Nimotate never rewrites your settings file.
+- Where you dragged the toolbar is kept separately in `~/.local/state/inkpane/state`,
+  so Inkpane never rewrites your settings file.
 
-## Controlling Nimotate from scripts
+## Controlling Inkpane from scripts
 
-The first `nimotate` you start stays running; running it again talks to that one:
+The first `inkpane` you start stays running; running it again talks to that one:
 
 | Command | Does |
 |---|---|
-| `nimotate` | Starts Nimotate, or toggles drawing if it is already running |
-| `nimotate --toggle` | Same as Meta+Z |
-| `nimotate --on` | Start drawing (or back to drawing from click-through) |
-| `nimotate --off` | Close and clear |
-| `nimotate --quit` | Quit Nimotate |
+| `inkpane` | Starts Inkpane, or toggles drawing if it is already running |
+| `inkpane --toggle` | Same as Meta+Z |
+| `inkpane --on` | Start drawing (or back to drawing from click-through) |
+| `inkpane --off` | Close and clear |
+| `inkpane --quit` | Quit Inkpane |
 
-Starting Nimotate from the app menu while it is running also toggles drawing.
+Starting Inkpane from the app menu while it is running also toggles drawing.
 
 On compositors without the global-shortcut portal (Sway, niri and others), bind
-`nimotate --toggle` to a key in the compositor's own config, for example in Sway:
+`inkpane --toggle` to a key in the compositor's own config, for example in Sway:
 
 ```
-bindsym $mod+z exec nimotate --toggle
+bindsym $mod+z exec inkpane --toggle
 ```
 
 ## Tips for screen recordings
 
-- Any recorder captures Nimotate (OBS, Spectacle, Kooha, …): the drawing really is on
+- Any recorder captures Inkpane (OBS, Spectacle, Kooha, …): the drawing really is on
   the screen, so there is nothing to configure.
 - The cursor ring and the toolbar are recorded too. Hide the toolbar with **Tab** for a
   cleaner video; the keys still work.
@@ -282,39 +282,39 @@ bindsym $mod+z exec nimotate --toggle
 
 ### Meta+Z does nothing
 
-- Nimotate has to be **installed** (`scripts/install-user.sh` or the package): the desktop
+- Inkpane has to be **installed** (`scripts/install-user.sh` or the package): the desktop
   only gives global shortcuts to apps with an installed `.desktop` file.
 - The first time, KDE shows a dialog to confirm the shortcut; check it was not dismissed.
-  You can also set it in System Settings → Shortcuts → Nimotate.
-- On desktops without the global-shortcut portal, bind `nimotate --toggle` yourself (see
-  [Controlling Nimotate from scripts](#controlling-nimotate-from-scripts)). The tray icon
+  You can also set it in System Settings → Shortcuts → Inkpane.
+- On desktops without the global-shortcut portal, bind `inkpane --toggle` yourself (see
+  [Controlling Inkpane from scripts](#controlling-inkpane-from-scripts)). The tray icon
   always works.
 
 ### Text tools do nothing
 
 Text, step markers, tooltips and the F1 help need **SDL3_ttf**, which is a separate
-package. Nimotate tells you once with a notification. Install it and restart Nimotate:
+package. Inkpane tells you once with a notification. Install it and restart Inkpane:
 
 - Arch: `sudo pacman -S sdl3_ttf`
 - Debian / Ubuntu: `sudo apt install libsdl3-ttf0` (name may vary by release)
 - Fedora: `sudo dnf install SDL3_ttf`
 
-Nimotate finds your desktop's default font through fontconfig. To use another, set
+Inkpane finds your desktop's default font through fontconfig. To use another, set
 `font =` in the settings to the path of a `.ttf` or `.otf` file.
 
 ### "Needs a Wayland session" or the overlay does not appear
 
-Nimotate needs a Wayland desktop with the layer-shell protocol: KDE Plasma, Hyprland,
+Inkpane needs a Wayland desktop with the layer-shell protocol: KDE Plasma, Hyprland,
 Sway, niri, COSMIC and others. GNOME and X11 sessions do not have it yet.
 
 ### No tray icon
 
 The tray uses the StatusNotifierItem standard. KDE shows it out of the box; on Sway or
-Hyprland you need a bar with a tray, such as Waybar. Nimotate works without a tray
-anyway: use Meta+Z or `nimotate --toggle`.
+Hyprland you need a bar with a tray, such as Waybar. Inkpane works without a tray
+anyway: use Meta+Z or `inkpane --toggle`.
 
 ### Where are the error messages?
 
-Errors that need your attention appear as desktop notifications. Start Nimotate from a
-terminal (`nimotate --quit; nimotate`) to see everything it reports, including settings
+Errors that need your attention appear as desktop notifications. Start Inkpane from a
+terminal (`inkpane --quit; inkpane`) to see everything it reports, including settings
 it could not read.

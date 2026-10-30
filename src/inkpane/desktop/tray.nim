@@ -13,8 +13,8 @@ const
   ItemInterface = "org.kde.StatusNotifierItem"
   MenuInterface = "com.canonical.dbusmenu"
   WatcherName = "org.kde.StatusNotifierWatcher"
-  IdleIcon = "org.vyrnexis.Nimotate-tray"
-  DrawingIcon = "org.vyrnexis.Nimotate-tray-active"
+  IdleIcon = "org.vyrnexis.Inkpane-tray"
+  DrawingIcon = "org.vyrnexis.Inkpane-tray-active"
 
   MenuToggleId = 1'i32
   MenuSeparatorId = 2'i32
@@ -139,7 +139,7 @@ proc tooltip(): GVariant =
   let description =
     if tray.drawing: "Drawing — " & shortcut & "Esc or click to stop"
     else: "Click" & (if shortcut.len > 0: " or press " & tray.shortcutHint else: "") & " to draw"
-  g_variant_new("(sa(iiay)ss)", "".cstring, pointer(nil), "Nimotate".cstring, description.cstring)
+  g_variant_new("(sa(iiay)ss)", "".cstring, pointer(nil), "Inkpane".cstring, description.cstring)
 
 ############################
 # StatusNotifierItem
@@ -148,8 +148,8 @@ proc tooltip(): GVariant =
 proc itemProperty(name: string): GVariant =
   case name
   of "Category": g_variant_new_string("ApplicationStatus")
-  of "Id": g_variant_new_string("nimotate")
-  of "Title": g_variant_new_string("Nimotate")
+  of "Id": g_variant_new_string("inkpane")
+  of "Title": g_variant_new_string("Inkpane")
   of "Status": g_variant_new_string("Active")
   of "WindowId": g_variant_new_int32(0)
   of "IconThemePath": g_variant_new_string(iconThemePath().cstring)
@@ -184,7 +184,7 @@ proc menuItemProperties(id: int32): GVariant =
   of MenuSeparatorId:
     put("type", g_variant_new_string("separator"))
   of MenuQuitId:
-    put("label", g_variant_new_string("Quit Nimotate"))
+    put("label", g_variant_new_string("Quit Inkpane"))
     put("icon-name", g_variant_new_string("application-exit"))
   else:
     discard

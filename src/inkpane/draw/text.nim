@@ -3,7 +3,7 @@ import std/[dynlib, math, tables]
 import sdl3
 
 # Text is optional. SDL3_ttf is a separate package that SDL3 does not pull in, so it is
-# opened at runtime instead of linked: without it Nimotate runs as before, only without
+# opened at runtime instead of linked: without it Inkpane runs as before, only without
 # the text tool, step markers, tooltips and the F1 help. FreeType and HarfBuzz, which it
 # needs, are on every desktop already.
 #

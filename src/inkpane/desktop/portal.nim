@@ -75,7 +75,7 @@ proc ensureSubscribed() =
 
 proc newToken(): string =
   inc tokenCounter
-  "nimotate" & $getCurrentProcessId() & "_" & $tokenCounter
+  "inkpane" & $getCurrentProcessId() & "_" & $tokenCounter
 
 proc addString(options: GVariantBuilder, key, value: string) =
   g_variant_builder_add(options, "{sv}", key.cstring, g_variant_new_string(value.cstring))

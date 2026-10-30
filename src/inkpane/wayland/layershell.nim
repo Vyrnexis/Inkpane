@@ -17,12 +17,12 @@ type
 
   LayerHandle* = ptr Layer
 
-proc layerShellInit(display: pointer): cint {.importc: "nimotate_layer_shell_init", cdecl.}
+proc layerShellInit(display: pointer): cint {.importc: "inkpane_layer_shell_init", cdecl.}
 proc layerCreate(display, surface, output: pointer, nameSpace: cstring,
-  exclusiveKeyboard: cint): LayerHandle {.importc: "nimotate_layer_create", cdecl.}
-proc layerDestroy(layer: LayerHandle) {.importc: "nimotate_layer_destroy", cdecl.}
+  exclusiveKeyboard: cint): LayerHandle {.importc: "inkpane_layer_create", cdecl.}
+proc layerDestroy(layer: LayerHandle) {.importc: "inkpane_layer_destroy", cdecl.}
 proc layerSetPassthrough(layer: LayerHandle, passthrough: cint, x, y, width, height: int32)
-  {.importc: "nimotate_layer_set_passthrough", cdecl.}
+  {.importc: "inkpane_layer_set_passthrough", cdecl.}
 proc wl_display_get_fd(display: pointer): cint {.importc, cdecl.}
 
 proc displayFd*(display: pointer): cint =

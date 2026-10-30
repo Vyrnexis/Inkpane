@@ -53,7 +53,7 @@ static const struct wl_registry_listener ni_registry_listener = {
     .global_remove = ni_registry_global_remove,
 };
 
-int nimotate_layer_shell_init(struct wl_display *display)
+int inkpane_layer_shell_init(struct wl_display *display)
 {
     if (ni_layer_shell) {
         return 1;
@@ -93,7 +93,7 @@ static const struct zwlr_layer_surface_v1_listener ni_layer_listener = {
  * (NULL lets the compositor choose). Blocks until the first configure so the
  * caller knows the size before SDL attaches a buffer.
  */
-NiLayer *nimotate_layer_create(struct wl_display *display, struct wl_surface *surface,
+NiLayer *inkpane_layer_create(struct wl_display *display, struct wl_surface *surface,
                              struct wl_output *output, const char *name_space,
                              int exclusive_keyboard)
 {
@@ -134,7 +134,7 @@ NiLayer *nimotate_layer_create(struct wl_display *display, struct wl_surface *su
  * none) and all keyboard input go to the windows below, while the overlay stays visible.
  * Off restores the whole surface as input region and exclusive keyboard focus.
  */
-void nimotate_layer_set_passthrough(NiLayer *layer, int passthrough,
+void inkpane_layer_set_passthrough(NiLayer *layer, int passthrough,
                                     int32_t x, int32_t y, int32_t width, int32_t height)
 {
     if (!layer || !layer->layer_surface) {
@@ -156,7 +156,7 @@ void nimotate_layer_set_passthrough(NiLayer *layer, int passthrough,
     wl_surface_commit(layer->surface);
 }
 
-void nimotate_layer_destroy(NiLayer *layer)
+void inkpane_layer_destroy(NiLayer *layer)
 {
     if (!layer) {
         return;

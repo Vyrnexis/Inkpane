@@ -6,7 +6,7 @@ description   = "Draw on your screen through a transparent Wayland overlay"
 license       = "MIT"
 srcDir        = "src"
 binDir        = "bin"
-bin           = @["nimotate"]
+bin           = @["inkpane"]
 
 
 # Dependencies
@@ -19,14 +19,14 @@ task Release, "Build a small, stripped binary into ./bin":
   # -Os + link-time optimisation + strip: about half the size of plain -d:release.
   # Drawing runs on the GPU, so optimising for size costs nothing noticeable.
   exec "nim c -d:release --opt:size --passC:-flto --passL:-flto --passL:-s " &
-    "--out:bin/nimotate src/nimotate.nim"
+    "--out:bin/inkpane src/inkpane.nim"
 
 task Debug, "Build a debug binary into ./bin":
   mkDir("bin")
-  exec "nim c --out:bin/nimotate src/nimotate.nim"
+  exec "nim c --out:bin/inkpane src/inkpane.nim"
 
 task Protocols, "Regenerate the Wayland protocol code with wayland-scanner":
-  const dir = "src/nimotate/wayland/"
+  const dir = "src/inkpane/wayland/"
   # xdg-shell is only needed for its interface table (layer-shell refers to xdg_popup).
   for name in ["wlr-layer-shell-unstable-v1", "xdg-shell"]:
     exec "wayland-scanner private-code " & dir & "protocols/" & name & ".xml " &

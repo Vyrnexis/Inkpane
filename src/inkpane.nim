@@ -2,15 +2,15 @@ import std/[math, parseopt, posix, strutils, tables]
 
 import sdl3
 
-import nimotate/config
-import nimotate/desktop/[dbus, glib, portal, tray]
-import nimotate/draw/[render, scene, text, toolbar]
-import nimotate/wayland/overlay
+import inkpane/config
+import inkpane/desktop/[dbus, glib, portal, tray]
+import inkpane/draw/[render, scene, text, toolbar]
+import inkpane/wayland/overlay
 
-# Nimotate: draw on the screen through a transparent Wayland overlay.
+# Inkpane: draw on the screen through a transparent Wayland overlay.
 #
 # Runs in the background with a tray icon. Meta+Z (GlobalShortcuts portal), a tray
-# click, or `nimotate --toggle` opens the overlay on every monitor; toggling again or Esc
+# click, or `inkpane --toggle` opens the overlay on every monitor; toggling again or Esc
 # closes it and clears the drawing. 1 / V switches to click-through: the drawing stays
 # while apps get the mouse and keyboard, until the toolbar or the toggle brings it back.
 
@@ -45,12 +45,12 @@ const
     FColor(r: 0.13, g: 0.14, b: 0.15, a: 1)
   ]
 
-  ServiceName = "org.vyrnexis.Nimotate"
-  ServicePath = "/org/vyrnexis/Nimotate"
-  ServiceInterface = "org.vyrnexis.Nimotate"
+  ServiceName = "org.vyrnexis.Inkpane"
+  ServicePath = "/org/vyrnexis/Inkpane"
+  ServiceInterface = "org.vyrnexis.Inkpane"
   ServiceXml = """
 <node>
-  <interface name="org.vyrnexis.Nimotate">
+  <interface name="org.vyrnexis.Inkpane">
     <method name="Toggle"/>
     <method name="Show"/>
     <method name="Hide"/>
@@ -102,13 +102,13 @@ type
 var pendingCommands: seq[Command]   # filled by D-Bus callbacks, drained by the main loop
 
 proc notifyError(message: string) =
-  # Desktop notification so errors are visible even though Nimotate has no window.
-  stderr.writeLine("nimotate: " & message)
+  # Desktop notification so errors are visible even though Inkpane has no window.
+  stderr.writeLine("inkpane: " & message)
   try:
     g_variant_unref(call("org.freedesktop.Notifications", "/org/freedesktop/Notifications",
       "org.freedesktop.Notifications", "Notify",
-      g_variant_new("(susssasa{sv}i)", "Nimotate".cstring, 0'u32, AppId.cstring,
-        "Nimotate".cstring, message.cstring, pointer(nil), pointer(nil), -1'i32)))
+      g_variant_new("(susssasa{sv}i)", "Inkpane".cstring, 0'u32, AppId.cstring,
+        "Inkpane".cstring, message.cstring, pointer(nil), pointer(nil), -1'i32)))
   except DBusError:
     discard
 
@@ -130,7 +130,7 @@ proc textMissing(app: var App): bool =
   if not app.warnedNoText:
     app.warnedNoText = true
     notifyError("Text, step markers and the help need SDL3_ttf: install sdl3_ttf " &
-      "(Arch) or libsdl3-ttf (Debian, Ubuntu), then restart Nimotate.")
+      "(Arch) or libsdl3-ttf (Debian, Ubuntu), then restart Inkpane.")
   true
 
 proc overlayFor(app: App, windowId: WindowID): Overlay =
@@ -592,7 +592,7 @@ proc bindToggleShortcut(app: var App) =
   except CatchableError:
     setTrayShortcutHint("")
     notifyError("Global shortcut unavailable (" & getCurrentExceptionMsg() &
-      "). Use the tray icon or `nimotate --toggle`.")
+      "). Use the tray icon or `inkpane --toggle`.")
 
 proc updateTooltip(app: var App) =
   ## A tooltip appears once the pointer rests on a toolbar button for a moment.
@@ -641,20 +641,20 @@ proc onQuitSignal(data: pointer): cint {.cdecl.} =
   1
 
 proc forwardToRunningInstance(command: Command): int =
-  # Another Nimotate owns the bus name: pass the request on (plain `nimotate` toggles).
+  # Another Inkpane owns the bus name: pass the request on (plain `inkpane` toggles).
   let methodName = $(if command == CmdNone: CmdToggle else: command)
   try:
     g_variant_unref(call(ServiceName, ServicePath, ServiceInterface, methodName))
     0
   except DBusError:
-    stderr.writeLine("nimotate: could not reach the running instance: " & getCurrentExceptionMsg())
+    stderr.writeLine("inkpane: could not reach the running instance: " & getCurrentExceptionMsg())
     1
 
 proc usage() =
-  echo """Usage: nimotate [--toggle | --on | --off | --quit]
+  echo """Usage: inkpane [--toggle | --on | --off | --quit]
 
-Starts Nimotate in the background (tray icon). With an instance already running,
-the options control it; plain `nimotate` then toggles drawing.
+Starts Inkpane in the background (tray icon). With an instance already running,
+the options control it; plain `inkpane` then toggles drawing.
 
   --toggle   start or stop drawing
   --on       start drawing
@@ -681,20 +681,20 @@ proc run(): int =
     if not requestName(ServiceName):
       return forwardToRunningInstance(command)
   except DBusError:
-    stderr.writeLine("nimotate: D-Bus unavailable: " & getCurrentExceptionMsg())
+    stderr.writeLine("inkpane: D-Bus unavailable: " & getCurrentExceptionMsg())
     return 1
   if command in {CmdQuit, CmdHide}:
-    echo "nimotate: not running"
+    echo "inkpane: not running"
     return 0
 
   discard setHint(HINT_NO_SIGNAL_HANDLERS, "1")   # GLib handles SIGINT/SIGTERM below
   if not init(INIT_VIDEO):
-    echo "nimotate: SDL init failed: ", getError()
+    echo "inkpane: SDL init failed: ", getError()
     return 1
   defer: sdl3.quit()
 
   if $getCurrentVideoDriver() != "wayland":
-    echo "nimotate: needs a Wayland session (SDL video driver is ", getCurrentVideoDriver(), ")"
+    echo "inkpane: needs a Wayland session (SDL video driver is ", getCurrentVideoDriver(), ")"
     return 1
 
   let settings = loadSettings()

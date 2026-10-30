@@ -8,7 +8,7 @@ import ../draw/[render, scene, text, toolbar]
 # One transparent, full-screen overlay window per monitor. Each SDL window is created
 # without a shell role and then turned into a wlr-layer-shell surface on its output.
 
-const LayerNamespace = "nimotate"
+const LayerNamespace = "inkpane"
 
 type
   Overlay* = ref object

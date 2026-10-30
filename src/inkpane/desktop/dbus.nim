@@ -1,9 +1,9 @@
 import glib
 
 # One private session-bus connection shared by the portal client, the tray icon and the
-# Nimotate control service. Exported objects dispatch into Nim closures.
+# Inkpane control service. Exported objects dispatch into Nim closures.
 
-const AppId* = "org.vyrnexis.Nimotate"   # reverse-DNS; matches the .desktop file name
+const AppId* = "org.vyrnexis.Inkpane"   # reverse-DNS; matches the .desktop file name
 
 type
   DBusError* = object of IOError
@@ -80,7 +80,7 @@ proc registerAppId*() =
       "org.freedesktop.host.portal.Registry", "Register",
       g_variant_new("(sa{sv})", AppId.cstring, pointer(nil))))
   except DBusError:
-    stderr.writeLine("nimotate: could not register app id: " & getCurrentExceptionMsg())
+    stderr.writeLine("inkpane: could not register app id: " & getCurrentExceptionMsg())
 
 proc emitSignal*(objectPath, interfaceName, signalName: string, parameters: GVariant = nil) =
   var error: ptr GError
