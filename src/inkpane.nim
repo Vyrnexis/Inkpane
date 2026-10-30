@@ -997,8 +997,12 @@ proc bindToggleShortcut(app: var App) =
       setTrayShortcutHint(app.shortcuts.triggers[ToggleShortcutId])
   except CatchableError:
     setTrayShortcutHint("")
-    notifyError("Global shortcut unavailable (" & getCurrentExceptionMsg() &
-      "). Use the tray icon or `inkpane --toggle`.")
+    # Once only: on compositors like Niri it fails at every start, and the user binds
+    # `inkpane --toggle` in the compositor instead.
+    if not shortcutNoticeShown():
+      markShortcutNoticeShown()
+      notifyError("Global shortcut unavailable (" & getCurrentExceptionMsg() &
+        "). Bind `inkpane --toggle` to a key in your compositor, or use the tray icon.")
 
 proc updateCursor(app: var App) =
   ## A move cursor over the toolbar's grip and while the toolbar is dragged.
@@ -1113,14 +1117,12 @@ proc run(): int =
     return 0
 
   discard setHint(HINT_NO_SIGNAL_HANDLERS, "1")   # GLib handles SIGINT/SIGTERM below
+  # Only Wayland works. Without this, SDL picks X11 on compositors lacking fifo-v1 (Niri).
+  discard setHintWithPriority(HINT_VIDEO_DRIVER, "wayland", HINT_OVERRIDE)
   if not init(INIT_VIDEO):
-    notifyError("Could not start: " & $getError())
+    notifyError("Inkpane needs a Wayland session: " & $getError())
     return 1
   defer: sdl3.quit()
-
-  if $getCurrentVideoDriver() != "wayland":
-    notifyError("Inkpane needs a Wayland session (this one is " & $getCurrentVideoDriver() & ").")
-    return 1
 
   let settings = loadSettings()
   setFontLookup(proc (): string = settings.findFont())

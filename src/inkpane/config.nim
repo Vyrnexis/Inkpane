@@ -182,19 +182,40 @@ proc findFont*(settings: Settings): string =
 # State
 ############################
 
-proc loadToolbarPlace*(): FPoint =
-  ## How far the toolbar was dragged from its default spot (top centre); (0, 0) if never.
+proc readState(): Ini =
   try:
-    let words = parseIni(readFile(statePath())).get("", "toolbar").splitWhitespace
-    if words.len == 2:
-      result = FPoint(x: parseFloat(words[0]), y: parseFloat(words[1]))
-  except IOError, OSError, ValueError:
-    discard   # no state yet, or unreadable: the default spot
+    result = parseIni(readFile(statePath()))
+  except IOError, OSError:
+    discard   # no state yet, or unreadable: defaults
 
-proc saveToolbarPlace*(place: FPoint) =
+proc saveState(key, value: string) =
+  ## Sets one value in the state file, keeping the others.
+  var text = "# Written by Inkpane.\n"
+  for entry in readState():
+    if entry.key != key:
+      text.add(entry.key & " = \"" & entry.value & "\"\n")
+  text.add(key & " = \"" & value & "\"\n")
   let path = statePath()
   try:
     createDir(path.parentDir)
-    writeFile(path, "# Written by Inkpane.\ntoolbar = \"" & $place.x & " " & $place.y & "\"\n")
+    writeFile(path, text)
   except OSError, IOError:
     stderr.writeLine("inkpane: could not save " & path & ": " & getCurrentExceptionMsg())
+
+proc loadToolbarPlace*(): FPoint =
+  ## How far the toolbar was dragged from its default spot (top centre); (0, 0) if never.
+  try:
+    let words = readState().get("", "toolbar").splitWhitespace
+    if words.len == 2:
+      result = FPoint(x: parseFloat(words[0]), y: parseFloat(words[1]))
+  except ValueError:
+    discard   # unreadable: the default spot
+
+proc saveToolbarPlace*(place: FPoint) =
+  saveState("toolbar", $place.x & " " & $place.y)
+
+proc shortcutNoticeShown*(): bool =
+  readState().get("", "shortcut_notice") == "shown"
+
+proc markShortcutNoticeShown*() =
+  saveState("shortcut_notice", "shown")

@@ -1,4 +1,4 @@
-import std/os
+import std/[os, strutils]
 
 import dbus
 import glib
@@ -13,8 +13,9 @@ const
   ItemInterface = "org.kde.StatusNotifierItem"
   MenuInterface = "com.canonical.dbusmenu"
   WatcherName = "org.kde.StatusNotifierWatcher"
-  IdleIcon = "org.vyrnexis.Inkpane-tray"
-  DrawingIcon = "org.vyrnexis.Inkpane-tray-active"
+  # KDE recolours the plain icons to match its panel; other trays (Waybar, Noctalia, …)
+  # draw them dark, so they get icons on a tile that show on any bar.
+  IconBase = "org.vyrnexis.Inkpane-tray"
 
   MenuToggleId = 1'i32
   MenuSeparatorId = 2'i32
@@ -154,7 +155,9 @@ proc itemProperty(name: string): GVariant =
   of "WindowId": g_variant_new_int32(0)
   of "IconThemePath": g_variant_new_string(iconThemePath().cstring)
   of "OverlayIconName", "AttentionIconName", "AttentionMovieName": g_variant_new_string("")
-  of "IconName": g_variant_new_string((if tray.drawing: DrawingIcon else: IdleIcon).cstring)
+  of "IconName":
+    let tile = if "KDE" in getEnv("XDG_CURRENT_DESKTOP"): "" else: "-tile"
+    g_variant_new_string(cstring(IconBase & tile & (if tray.drawing: "-active" else: "")))
   of "IconPixmap", "OverlayIconPixmap", "AttentionIconPixmap": g_variant_new("a(iiay)", pointer(nil))
   of "ToolTip": tooltip()
   of "ItemIsMenu": g_variant_new_boolean(0)

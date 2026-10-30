@@ -308,6 +308,12 @@ On compositors without the global-shortcut portal (Sway, niri and others), bind
 bindsym $mod+z exec inkpane --toggle
 ```
 
+or in niri's `binds { }` section:
+
+```
+Mod+Z { spawn "inkpane" "--toggle"; }
+```
+
 ## Tips for screen recordings
 
 - Any recorder captures Inkpane (OBS, Spectacle, Kooha, …): the drawing really is on
