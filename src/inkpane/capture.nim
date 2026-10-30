@@ -1,4 +1,4 @@
-import std/[dynlib, os, osproc, streams, strutils, times]
+import std/[dynlib, os, osproc, posix, streams, strutils]
 
 import sdl3
 
@@ -138,7 +138,12 @@ proc save*(surface: ptr Surface, path: string): bool =
 
 proc newScreenshotPath*(folder: string): string =
   ## Inkpane_2026-10-30_17-05-09.png, with -2, -3 … when several land in one second.
-  let stem = folder / "Inkpane_" & now().format("yyyy-MM-dd'_'HH-mm-ss")
+  var now: posix.Time
+  discard posix.time(now)
+  var stamp: array[32, char]
+  discard strftime(cast[cstring](stamp[0].addr), stamp.len, "%Y-%m-%d_%H-%M-%S",
+    localtime(now)[])
+  let stem = folder / "Inkpane_" & $cast[cstring](stamp[0].addr)
   result = stem & ".png"
   var n = 2
   while fileExists(result):

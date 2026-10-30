@@ -1,4 +1,4 @@
-import std/[base64, json, math, os, osproc, strutils]
+import std/[base64, json, math, os, osproc, sequtils, strutils, unicode]
 
 import inkpane/desktop/[dbus, glib]
 
@@ -12,6 +12,11 @@ const
   MaxSide = 1568.0          # images beyond these limits get resized by the API, which
   MaxPixels = 1_150_000.0   # would break the coordinates we hand to the model
   CaptureTimeoutMs = 60_000
+  # Defaults in screenshot pixels, so marks keep the proportions the model sees whatever
+  # the monitor's size: 16 px text is 24 px on screen at 1080p, 35 px on a 3440 px screen.
+  DefaultFont = 16.0
+  DefaultRadius = 11.0   # step markers
+  DefaultWidth = 3.0
   Versions = ["2024-11-05", "2025-03-26", "2025-06-18"]
   Colors = {
     "red": "#ed3333", "orange": "#fa8c21", "yellow": "#fad926", "green": "#33c759",
@@ -19,7 +24,7 @@ const
   }
   Instructions = """Inkpane draws on the user's real screen. You can only draw; the user does all the clicking.
 Ask the user before your first screenshot in a session, and say when you take one.
-Teach one step at a time: take a screenshot, mark one thing (circle or arrow plus a 2-4 word label, or a step marker), explain why in chat, wait for the user, screenshot again to check, then `clear` before the next step.
+Teach one step at a time: take a screenshot, mark one thing (`circle` it, or an arrow, plus a 2-4 word label, or a step marker), explain why in chat, wait for the user, screenshot again to check, then `clear` before the next step.
 Keep at most about three marks on screen.
 Coordinates are pixels of the latest screenshot of that monitor, origin top-left."""
 
@@ -129,9 +134,9 @@ proc flag(args: JsonNode, key: string): bool =
     raise newException(ToolError, key & " must be true or false")
   args[key].getBool
 
-proc color(args: JsonNode): string =
+proc color(args: JsonNode, key = "color"): string =
   ## "" lets Inkpane pick its default (red).
-  let value = text(args, "color").toLowerAscii
+  let value = text(args, key).toLowerAscii
   if value.len == 0:
     return ""
   for (name, hex) in Colors:
@@ -203,24 +208,76 @@ proc drawTool(args: JsonNode): JsonNode =
     raise newException(ToolError, "kind must be rectangle, ellipse, diamond, arrow, line, highlighter or pen")
   let (index, m) = pick(args)
   let pts = points(args, m, 2, (if kind == "pen": 10_000 else: 2))
-  draw(index, kind, pts, color(args), number(args, "width", 0) / m.scale, flag(args, "filled"))
-  reply("Drew " & kind & " on monitor " & $index & ".")
+  let label = text(args, "label")
+  if label.len > 0 and kind notin ["rectangle", "ellipse", "diamond"]:
+    raise newException(ToolError, "label is for rectangle, ellipse and diamond; use add_text")
+  draw(index, kind, pts, color(args), number(args, "width", DefaultWidth) / m.scale,
+    flag(args, "filled"))
+  if label.len > 0:   # Inkpane centres it in the shape's box
+    draw(index, "text", points(args, m, 2, 2), color(args, "label_color"),
+      number(args, "size", DefaultFont) / m.scale, false, label)
+  reply("Drew " & kind & (if label.len > 0: " with its label" else: "") & " on monitor " &
+    $index & ".")
+
+proc circle(args: JsonNode): JsonNode =
+  ## An ellipse inside a box only touches the box's sides, so one drawn on a control's
+  ## own box cuts its corners: grow it by √2 (through the corners) plus a margin.
+  let box = if args.hasKey("box"): args["box"] else: newJNull()
+  if box.kind != JArray or box.len != 4 or box.anyIt(it.kind notin {JInt, JFloat}):
+    raise newException(ToolError, "box must be [left, top, right, bottom]")
+  let (left, top) = (min(box[0].getFloat, box[2].getFloat), min(box[1].getFloat, box[3].getFloat))
+  let (right, bottom) = (max(box[0].getFloat, box[2].getFloat), max(box[1].getFloat, box[3].getFloat))
+  let (cx, cy) = ((left + right) / 2, (top + bottom) / 2)
+  let rx = (right - left) / 2 * sqrt(2.0) + 4
+  let ry = (bottom - top) / 2 * sqrt(2.0) + 4
+  let (index, m) = pick(args)
+  let pts = points(%*{"points": [[cx - rx, cy - ry], [cx + rx, cy + ry]]}, m, 2, 2)
+  draw(index, "ellipse", pts, color(args), number(args, "width", DefaultWidth) / m.scale, false)
+  result = reply("Circled [" & $int(left) & ", " & $int(top) & ", " & $int(right) & ", " &
+    $int(bottom) & "] on monitor " & $index & "; the ellipse spans [" & $int(cx - rx) & ", " &
+    $int(cy - ry) & ", " & $int(cx + rx) & ", " & $int(cy + ry) & "].")
+  let label = text(args, "label")
+  if label.len == 0:
+    return
+  # The label goes just outside the ellipse on the side asked for. Its width is estimated
+  # (about 0.55 em per character); Inkpane's default text is 24 px on screen.
+  let font = number(args, "size", DefaultFont)
+  let (w, h) = (float(label.runeLen) * font * 0.55, font * 1.25)
+  let gap = 8.0
+  let (mw, mh) = m.modelSize
+  let side = text(args, "label_side", "right")
+  var (x, y) = case side
+    of "right": (cx + rx + gap, cy - h / 2)
+    of "left": (cx - rx - gap - w, cy - h / 2)
+    of "above": (cx - w / 2, cy - ry - gap - h)
+    of "below": (cx - w / 2, cy + ry + gap)
+    else: raise newException(ToolError, "label_side must be right, left, above or below")
+  x = clamp(x, 0, max(float(mw) - w, 0))
+  y = clamp(y, 0, max(float(mh) - h, 0))
+  # Above and below are centred by Inkpane, which knows the text's real width.
+  let at = if side in ["above", "below"]: %*{"points": [[cx, y], [cx, y + h]]}
+           else: %*{"points": [[x, y]]}
+  draw(index, "text", points(at, m, 1, 2), color(args), font / m.scale, false, label)
+  result = reply(result["content"][0]["text"].getStr & " Label at about [" & $int(x) & ", " &
+    $int(y) & ", " & $int(x + w) & ", " & $int(y + h) & "].")
 
 proc addText(args: JsonNode): JsonNode =
   let label = text(args, "text")
   if label.len == 0:
     raise newException(ToolError, "text must not be empty")
   let (index, m) = pick(args)
-  let at = %*{"points": [[number(args, "x", 0), number(args, "y", 0)]]}
-  draw(index, "text", points(at, m, 1, 1), color(args), number(args, "size", 0) / m.scale,
+  let (x, y) = (number(args, "x", 0), number(args, "y", 0))
+  # Two equal points: Inkpane centres the text on them.
+  let at = if flag(args, "centered"): %*{"points": [[x, y], [x, y]]} else: %*{"points": [[x, y]]}
+  draw(index, "text", points(at, m, 1, 2), color(args), number(args, "size", DefaultFont) / m.scale,
     false, label)
   reply("Added text on monitor " & $index & ".")
 
 proc addStepMarker(args: JsonNode): JsonNode =
   let (index, m) = pick(args)
   let at = %*{"points": [[number(args, "x", 0), number(args, "y", 0)]]}
-  draw(index, "marker", points(at, m, 1, 1), color(args), number(args, "size", 0) / m.scale,
-    false)
+  draw(index, "marker", points(at, m, 1, 1), color(args),
+    number(args, "size", DefaultRadius) / m.scale, false)
   reply("Added a numbered step marker on monitor " & $index & ".")
 
 proc undoLast(args: JsonNode): JsonNode =
@@ -260,7 +317,6 @@ let monitorProp = %*{"type": "integer", "minimum": 0,
   "description": "Monitor index from screen_info. Default 0."}
 let colorProp = %*{"type": "string",
   "description": "red (default), orange, yellow, green, blue, purple, white, black, or #rrggbb."}
-let sizeProp = %*{"type": "number", "description": "In screenshot pixels. Omit for the default."}
 
 proc tool(name, description: string, inputSchema: JsonNode): JsonNode =
   %*{"name": name, "description": description, "inputSchema": inputSchema}
@@ -280,24 +336,42 @@ proc toolList(): JsonNode =
       "ellipse and diamond the start and the opposite corner; for arrow and line the tail " &
       "and the head (the arrowhead lands on the target); highlighter takes start and end. " &
       "pen takes 2 or more points. To circle something, use an ellipse whose corners lie a " &
-      "bit outside it.",
+      "bit outside it (or use the circle tool, which does that for you).",
       schema("", %*{
         "kind": {"type": "string", "enum": ["rectangle", "ellipse", "diamond", "arrow",
           "line", "highlighter", "pen"]},
         "points": {"type": "array", "minItems": 2,
           "items": {"type": "array", "items": xy, "minItems": 2, "maxItems": 2}},
         "color": colorProp,
-        "width": {"type": "number", "description": "Line width in screenshot pixels. Omit for the default."},
+        "width": {"type": "number", "description": "Line width in screenshot pixels. Default 3."},
         "filled": {"type": "boolean", "description": "Fill rectangle, ellipse or diamond."},
+        "label": {"type": "string", "description": "Text centred inside a rectangle, ellipse or diamond (diagrams)."},
+        "label_color": {"type": "string", "description": "Colour of the label; default red. On a board, black or white reads best."},
+        "size": {"type": "number", "description": "Label font size in screenshot pixels. Default 16."},
         "monitor": monitorProp}, @["kind", "points"])),
+    tool("circle", "Circle a control or area: give the box of the thing itself (its own " &
+      "edges, in screenshot pixels) and Inkpane draws an ellipse that frames it with room " &
+      "to spare. The best way to say \"click this\". Leave space around the box for it.",
+      schema("", %*{
+        "box": {"type": "array", "items": xy, "minItems": 4, "maxItems": 4,
+          "description": "[left, top, right, bottom] of the thing to circle."},
+        "label": {"type": "string", "description": "Optional label of 2-4 words, placed just outside the circle."},
+        "label_side": {"type": "string", "enum": ["right", "left", "above", "below"],
+          "description": "Side of the circle for the label: pick the side with empty space (no buttons or text). Default right."},
+        "size": {"type": "number", "description": "Label font size in screenshot pixels. Default 16."},
+        "color": colorProp,
+        "width": {"type": "number", "description": "Line width in screenshot pixels. Omit for the default."},
+        "monitor": monitorProp}, @["box"])),
     tool("add_text", "Write a short label on the screen (2-4 words works best), next to " &
       "what it explains.",
       schema("", %*{"x": xy, "y": xy, "text": {"type": "string"}, "color": colorProp,
-        "size": {"type": "number", "description": "Font size in screenshot pixels. Default about 24 on screen."},
+        "size": {"type": "number", "description": "Font size in screenshot pixels. Default 16."},
+        "centered": {"type": "boolean", "description": "x, y is the centre of the text instead of its top-left corner."},
         "monitor": monitorProp}, @["x", "y", "text"])),
     tool("add_step_marker", "Place a numbered circle (1, 2, 3, ... assigned automatically) " &
       "centred at x, y, to mark the order of steps.",
-      schema("", %*{"x": xy, "y": xy, "color": colorProp, "size": sizeProp,
+      schema("", %*{"x": xy, "y": xy, "color": colorProp,
+        "size": {"type": "number", "description": "Radius in screenshot pixels. Default 11."},
         "monitor": monitorProp}, @["x", "y"])),
     tool("undo_last", "Remove the most recent mark you made.", schema("", %*{})),
     tool("clear", "Remove marks from the screen. \"ai\" (default) removes only the marks you " &
@@ -319,6 +393,7 @@ proc callTool(name: string, args: JsonNode): JsonNode =
       of "screen_info": screenInfo
       of "screenshot": screenshot
       of "draw": drawTool
+      of "circle": circle
       of "add_text": addText
       of "add_step_marker": addStepMarker
       of "undo_last": undoLast

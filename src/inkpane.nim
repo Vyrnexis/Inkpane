@@ -222,7 +222,8 @@ proc drawTexts(overlay: Overlay, background: FColor) =
     of Text:
       let size = if item.text.len == 0: FPoint(x: 0, y: lineHeight(item.width))   # just typing
                  else: renderer.drawText(overlay.texts, item.text, item.points[0], item.width,
-                   item.color.onBackground(background), true, overlay.scale)
+                   item.color.onBackground(background), background.a < 1, overlay.scale)
+                   # the halo keeps text readable over the desktop; a board needs none
       item.setBox(size)   # for the eraser and the typing hint
     of Marker:
       let a = item.points[0]
@@ -841,9 +842,14 @@ proc aiDraw(app: var App, parameters: GVariant) =
   if not found:
     raise newException(ValueError, "Unknown kind: " & $kind)
   let needed = if tool in Placed: 1 else: 2
-  if path.len < needed or (tool notin Placed + {Pen} and path.len != 2):
+  if path.len < needed or (tool notin Placed + {Pen} and path.len != 2) or
+      (tool == Marker and path.len != 1) or (tool == Text and path.len > 2):
     raise newException(ValueError, $kind & " needs " &
-      (if tool in Placed: "1 point" elif tool == Pen: "2 or more points" else: "2 points"))
+      (case tool
+        of Marker: "1 point"
+        of Text: "1 point (top-left), or 2 to centre it in their box"
+        of Pen: "2 or more points"
+        else: "2 points"))
   if tool == Text and ($text).len == 0:
     raise newException(ValueError, "Text needs some text.")
   let ink = if ($color).len == 0: app.settings.palette[0] else: parseColor($color)
@@ -861,7 +867,12 @@ proc aiDraw(app: var App, parameters: GVariant) =
   of Marker:
     overlay.scene.addMarker(path[0], (if size > 0: size else: 15), ink, byAi = true)
   of Text:
-    overlay.scene.addItem(aiItem(Text, path, ink, (if size > 0: size else: 24), text = $text))
+    let fontSize = if size > 0: size else: 24
+    var at = path[0]
+    if path.len == 2:   # centred in the box of the two points
+      let extent = measureText($text, fontSize)
+      at = FPoint(x: (path[0].x + path[1].x - extent.x) / 2, y: (path[0].y + path[1].y - extent.y) / 2)
+    overlay.scene.addItem(aiItem(Text, @[at], ink, fontSize, text = $text))
   else:
     overlay.scene.addItem(aiItem(tool, path, ink, (if size > 0: size else: 4), filled != 0))
   app.aiOrder.add(overlay)

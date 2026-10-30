@@ -1,4 +1,4 @@
-import std/[os, strutils, tables, uri]
+import std/[os, strutils, tables]
 
 import dbus
 import glib
@@ -222,8 +222,15 @@ proc takeScreenshot*(): string =
   g_variant_unref(results)
   if uriValue.isNil:
     raise newException(PortalError, "The desktop portal returned no screenshot.")
-  let address = parseUri($g_variant_get_string(uriValue, nil))
+  let address = $g_variant_get_string(uriValue, nil)
   g_variant_unref(uriValue)
-  if address.scheme != "file":
-    raise newException(PortalError, "The screenshot is not a local file: " & $address)
-  decodeUrl(address.path, decodePlus = false)
+  if not address.startsWith("file://"):
+    raise newException(PortalError, "The screenshot is not a local file: " & address)
+  var i = "file://".len   # the path, with %XX escapes decoded
+  while i < address.len:
+    if address[i] == '%' and i + 2 < address.len:
+      result.add(chr(fromHex[int](address[i + 1 .. i + 2])))
+      i += 3
+    else:
+      result.add(address[i])
+      inc i

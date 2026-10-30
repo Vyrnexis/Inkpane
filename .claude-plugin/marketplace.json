@@ -1,0 +1,19 @@
+{
+  "name": "inkpane",
+  "owner": {
+    "name": "Vyrnexis",
+    "url": "https://github.com/Vyrnexis"
+  },
+  "metadata": {
+    "description": "Inkpane for Claude Code: draw on the user's screen to teach and explain"
+  },
+  "plugins": [
+    {
+      "name": "inkpane",
+      "source": "./claude-plugin",
+      "description": "Lets Claude point at things on your real screen: circles, arrows, labels and numbered steps drawn with Inkpane, plus screenshots so it can see what it points at. Needs Inkpane installed (Linux, Wayland).",
+      "category": "productivity",
+      "tags": ["wayland", "annotation", "teaching", "screenshot", "mcp"]
+    }
+  ]
+}

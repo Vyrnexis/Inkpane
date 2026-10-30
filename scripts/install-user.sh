@@ -13,13 +13,14 @@ APP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 AUTOSTART_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
 ICON_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps"
 
-if [ ! -x "$BIN_SRC" ]; then
+if [ ! -x "$BIN_SRC" ] || [ ! -x "$ROOT_DIR/bin/inkpane-mcp" ]; then
   echo "Missing $BIN_SRC - run 'nimble Release' first." >&2
   exit 1
 fi
 
 mkdir -p "$BIN_DIR" "$APP_DIR" "$ICON_DIR"
 install -m 755 "$BIN_SRC" "$BIN_DIR/inkpane"
+install -m 755 "$ROOT_DIR/bin/inkpane-mcp" "$BIN_DIR/inkpane-mcp"   # for AI clients
 install -m 644 "$ROOT_DIR"/data/icons/hicolor/scalable/apps/*.svg "$ICON_DIR/"
 sed -e "s|@APP_BIN@|$BIN_DIR/inkpane|g" "$ROOT_DIR/data/$APP_ID.desktop" > "$APP_DIR/$APP_ID.desktop"
 chmod 644 "$APP_DIR/$APP_ID.desktop"
