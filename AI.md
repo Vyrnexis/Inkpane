@@ -73,7 +73,9 @@ screen, so they're in the recording.
 ## Letting the AI click (opt-in)
 
 If you'd rather Claude stepped through a task by itself, for example to make a
-tutorial while you watch, turn it on in `~/.config/inkpane/inkpane.conf`:
+tutorial while you watch, add these lines to Inkpane's settings file,
+`~/.config/inkpane/inkpane.conf` (they aren't there by default, and without them the AI
+never clicks):
 
 ```ini
 [ai]
@@ -88,7 +90,7 @@ clicking = yes
   never types passwords.
 - **Inkpane must be in click-through** for clicks to reach your apps. Clicks that would
   draw, or land on Inkpane's toolbar, are refused.
-- **Turning it off:** set `clicking = no` or delete the line. That takes effect
+- **Turning it off:** delete the lines (or set `clicking = no`). That takes effect
   immediately.
 
 ## Privacy

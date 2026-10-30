@@ -277,14 +277,7 @@ font = ""
 # Folder for screenshots (Ctrl+S). Empty: Inkpane in your Pictures folder.
 folder = ""
 
-[ai]
-# Let AI assistants using inkpane-mcp (such as Claude Code) click and type for you,
-# for example to step through a tutorial by themselves. Off: they only point and you
-# click. Your desktop still asks your permission the first time.
-clicking = no
 ```
-
-The `[ai]` section only matters if you use an AI assistant; see [AI.md](AI.md).
 
 - Delete a line to get its default back; delete the file to get a fresh, fully
   commented one.
