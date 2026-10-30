@@ -8,7 +8,7 @@ through to show it working, press the key again and it is gone.
 
 ## Why Inkpane
 
-- **Small and fast.** A 240 KB program that waits in the tray at about 10 MB of memory
+- **Small and fast.** A 285 KB program that waits in the tray at about 10 MB of memory
   and no CPU. Drawing is one cached mesh per monitor, anti-aliased, at full refresh rate.
 - **The tools people actually use.** Pen, rectangle, diamond, ellipse, arrow, line,
   highlighter, text, numbered step markers and an eraser, with a whiteboard and
@@ -17,6 +17,11 @@ through to show it working, press the key again and it is gone.
   arrow, 7 / P pen …), Shift for squares and 15° angles, Ctrl from the centre.
 - **Click-through.** Keep your drawing on screen while you click and type in the app
   below it, then carry on drawing: show a step, do it, show the next.
+- **Screenshots with your notes on them.** Ctrl+S, drag an area (or click for the whole
+  screen): saved to Pictures/Inkpane and copied to the clipboard, ready to paste.
+- **An AI that points at your screen.** With the Claude Code plugin, Claude can circle
+  the button to click, number the steps and sketch diagrams on a whiteboard, then take a
+  screenshot to check how you got on. You do the clicking; it shows you where.
 - **Recorder-friendly.** The drawing really is on screen, so OBS, Spectacle or any
   recorder captures it with no setup.
 
@@ -36,6 +41,7 @@ through to show it working, press the key again and it is gone.
 | C or Delete | Clear (Ctrl+Z brings it back) |
 | 1 / V | Click-through: apps get the mouse and keys, your drawing stays |
 | Ctrl+W / Ctrl+B | Whiteboard / blackboard |
+| Ctrl+S | Screenshot: drag an area, or click for the whole screen |
 | Tab | Hide or show the toolbar |
 | F1 | Every key, on screen |
 | Esc | Cancel the shape being drawn, or close and clear |
@@ -50,6 +56,8 @@ scripting and troubleshooting.
 - SDL3 (3.2+), libwayland-client and GLib/GIO. No GTK, no Qt.
 - Optional: **SDL3_ttf** for text, step markers, tooltips and the F1 help
   (`sdl3_ttf` on Arch). Everything else works without it.
+- Screenshots need SDL 3.4 (or SDL3_image) and the desktop's screenshot portal;
+  `wl-clipboard` makes copying them to the clipboard more reliable.
 
 ## Install
 
@@ -67,12 +75,31 @@ scripts/install-user.sh        # or: scripts/install-user.sh --autostart
 inkpane &
 ```
 
-Installing matters: the desktop only grants the Meta+Z shortcut to apps with an
-installed `.desktop` file. `scripts/uninstall-user.sh` removes everything again.
+This installs `inkpane` and `inkpane-mcp` (for AI clients). Installing matters: the
+desktop only grants the Meta+Z shortcut to apps with an installed `.desktop` file.
+`scripts/uninstall-user.sh` removes everything again.
 
 The first time you press Meta+Z, KDE asks you to confirm the shortcut. On compositors
 without the shortcut portal, bind `inkpane --toggle` to a key yourself (see the
 [guide](GUIDE.md#controlling-inkpane-from-scripts)).
+
+## Teach with Claude Code
+
+Inkpane comes with a Claude Code plugin: an MCP server (`inkpane-mcp`) and a skill
+that teaches Claude to guide you step by step on your real screen. Install Inkpane
+first, then in Claude Code:
+
+```
+/plugin marketplace add Vyrnexis/Inkpane
+/plugin install inkpane@inkpane
+```
+
+Then ask things like *"How do I turn on night colour in KDE? Show me on my screen"* or
+*"Explain how git branches work, on the whiteboard"*. Claude asks before its first
+screenshot, marks one step at a time, and waits for you to do it. It can only draw:
+every click is yours. Other MCP clients can use `inkpane-mcp` directly
+(`claude mcp add inkpane -- inkpane-mcp` adds just the server). See the
+[guide](GUIDE.md#ai-claude-points-at-your-screen).
 
 ## Size and speed
 
@@ -80,7 +107,7 @@ Measured on a release build (x86-64, KDE Plasma):
 
 | | |
 |---|---|
-| Binary | 240 KB; links only SDL3, libwayland-client and libc |
+| Binary | 285 KB; links only SDL3, libwayland-client and libc (`inkpane-mcp`: 160 KB, no SDL) |
 | Idle in the background | ~10 MB resident (~1.5 MB of it Inkpane's own), 0 % CPU |
 | Drawing | ~8 µs per pen point; one draw call per monitor per frame |
 | Undo or erase on a busy screen | under 4 ms to rebuild 30 000 points |

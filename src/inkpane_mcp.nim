@@ -11,7 +11,7 @@ const
   ObjectPath = "/org/vyrnexis/Inkpane"
   MaxSide = 1568.0          # images beyond these limits get resized by the API, which
   MaxPixels = 1_150_000.0   # would break the coordinates we hand to the model
-  CaptureTimeoutMs = 60_000
+  CaptureTimeoutMs = 130_000   # Inkpane waits up to 120 s for the permission dialog
   # Defaults in screenshot pixels, so marks keep the proportions the model sees whatever
   # the monitor's size: 16 px text is 24 px on screen at 1080p, 35 px on a 3440 px screen.
   DefaultFont = 16.0

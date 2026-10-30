@@ -10,6 +10,8 @@ Everything Inkpane does, and how to get the most out of it. For installation see
 - [Fixing mistakes](#fixing-mistakes)
 - [Click-through](#click-through)
 - [Whiteboard and blackboard](#whiteboard-and-blackboard)
+- [Screenshots](#screenshots)
+- [AI: Claude points at your screen](#ai-claude-points-at-your-screen)
 - [The toolbar](#the-toolbar)
 - [Several monitors](#several-monitors)
 - [Settings](#settings)
@@ -186,12 +188,69 @@ ink on the blackboard is shown white, so nothing disappears; switch back and it 
 own colour again. Closing Inkpane puts the board away: the next time starts over your
 desktop.
 
+## Screenshots
+
+Press **Ctrl+S** (or click the camera at the right end of the toolbar), then:
+
+- **drag** a rectangle to capture that area, or
+- **click** to capture the whole monitor.
+
+**Esc** or a right click cancels. The screenshot includes your drawing but none of
+Inkpane's own parts (toolbar, cursor ring, hints). It is saved as
+`Inkpane_2026-10-30_14-05-09.png` in `~/Pictures/Inkpane/` (your Pictures folder, in
+your language), copied to the clipboard so you can paste it straight into a chat or
+document, and a notification says where it went. The overlay stays open, so you can
+carry on drawing.
+
+The camera button also works from click-through: annotate, click through to set the
+app up, then click the camera.
+
+**The first time**, your desktop asks whether Inkpane may take screenshots. Inkpane lets
+go of the mouse and keyboard while it waits, so you can answer. Allow it once and it is
+remembered. Change the folder in the [settings](#settings).
+
+## AI: Claude points at your screen
+
+Inkpane includes a [Claude Code](https://claude.com/claude-code) plugin. With it, Claude
+can show you how to do things on your own screen instead of describing where to click:
+it circles the right button, adds a short label or numbered steps, waits for you to do
+it, and takes a screenshot to check.
+
+**Set up** (Inkpane installed, so `inkpane-mcp` is on your PATH):
+
+```
+/plugin marketplace add Vyrnexis/Inkpane
+/plugin install inkpane@inkpane
+```
+
+**Use it** by asking for help as you would anyone looking over your shoulder:
+
+- *"How do I change the screen brightness schedule in KDE? Show me."*
+- *"Where are this app's keyboard shortcuts? Point at it."*
+- *"Explain how a web page gets from the server to my browser, on the whiteboard."*
+- *"Review this dialog: mark anything that looks wrong."*
+
+What to expect:
+
+- Claude asks before its first screenshot, and says whenever it takes one. Screenshots
+  show your screen to Claude, so it only takes them while helping you.
+- It marks **one step at a time** in a few colours: green for "do this", blue for
+  "look here", red for "not this one". Explanations stay in the chat.
+- After each step, tell it "done" (or what happened); it checks and shows the next one.
+- **Claude can only draw.** It cannot click, type or change anything; you do every step.
+- Inkpane opens in click-through for Claude, so the mouse and keyboard stay yours. Its
+  marks are kept apart from your own drawing: it removes only its own when it moves on,
+  and you can undo or erase them like anything else.
+
+Other MCP clients can run `inkpane-mcp` as a stdio server (`claude mcp add inkpane --
+inkpane-mcp` adds only the server to Claude Code, without the skill).
+
 ## The toolbar
 
 The toolbar floats at the top centre of each monitor, low enough to clear a top panel:
 
 ```
- cursor │ tools … │ fill │ colours … │ widths
+ cursor │ tools … │ fill │ colours … │ widths │ camera
 ```
 
 - Click a button to pick it; the current choices are highlighted.
@@ -243,6 +302,10 @@ visible = yes
 # Font file for text, step markers, tooltips and the F1 help. Empty: the desktop's
 # default sans-serif font. Text needs SDL3_ttf (package sdl3_ttf or libsdl3-ttf).
 font = ""
+
+[screenshot]
+# Folder for screenshots (Ctrl+S). Empty: Inkpane in your Pictures folder.
+folder = ""
 ```
 
 - Delete a line to get its default back; delete the file to get a fresh, fully
@@ -313,6 +376,20 @@ Inkpane finds your desktop's default font through fontconfig. To use another, se
 
 Inkpane needs a Wayland desktop with the layer-shell protocol: KDE Plasma, Hyprland,
 Sway, niri, COSMIC and others. GNOME and X11 sessions do not have it yet.
+
+### Screenshots don't work
+
+- "Screenshots need SDL 3.4": Inkpane reads and writes PNG through SDL 3.4 or
+  SDL3_image. Update SDL3, or install SDL3_image, and restart Inkpane.
+- Nothing happens, or "Timed out waiting for the desktop portal": the desktop's
+  permission dialog may be waiting behind another window. Allow it and try again.
+- Pasting gives nothing: install `wl-clipboard`; Inkpane then copies through `wl-copy`,
+  which works more reliably than its own clipboard.
+
+### Claude says Inkpane is not running
+
+`inkpane-mcp` starts Inkpane when needed; it looks next to itself and then on your
+PATH. Check that both are installed (`which inkpane inkpane-mcp`).
 
 ### No tray icon
 
