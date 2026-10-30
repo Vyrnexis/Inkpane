@@ -5,7 +5,7 @@ import sdl3
 import render, scene
 
 # Floating strip at the top centre of each monitor (or wherever it was dragged):
-# click-through, tools, fill, colours, widths.
+# click-through, tools, fill, colours, widths, screenshot.
 # Icons and key digits are drawn as lines with the same mesh code as the drawing, so the
 # toolbar needs no font and no image files. The mesh is rebuilt only when what the
 # toolbar shows (tool, colour, width, fill, hovered button) changes.
@@ -49,7 +49,7 @@ const
 
 type
   ButtonKind* = enum
-    PassButton, ToolButton, FillButton, ColorButton, WidthButton
+    PassButton, ToolButton, FillButton, ColorButton, WidthButton, CaptureButton
 
   Button* = object
     kind*: ButtonKind
@@ -62,6 +62,7 @@ type
     width*: float32
     fill*: bool
     passthrough*: bool
+    selecting*: bool   # picking an area to capture
     hover*: int     # button under the pointer, -1 for none
 
   Toolbar* = object
@@ -110,6 +111,8 @@ proc layout(toolbar: var Toolbar, screen, place: FPoint, colors: int) =
   separate()
   for i in 0 .. toolbar.presets.high:
     add(WidthButton, i, ButtonSize)
+  separate()
+  add(CaptureButton, 0, ButtonSize)
   let width = x + Padding
   let height = ButtonSize + 2 * Padding
   # Whole pixels keep the key digits crisp; clamped so a drag never loses it off screen.
@@ -138,6 +141,7 @@ proc label*(toolbar: Toolbar, button: Button): string =
   of FillButton: "Fill shapes   F"
   of ColorButton: "Colour   Shift+" & $(button.index + 1)
   of WidthButton: "Width " & formatFloat(toolbar.presets[button.index], precision = -1) & "   [ ]"
+  of CaptureButton: "Screenshot   Ctrl+S"
 
 proc tooltipAnchor*(button: Button): FPoint =
   ## Centre of the button's bottom edge, where its tooltip hangs from.
@@ -237,10 +241,12 @@ proc addDigit(mesh: var Mesh, digit: int, topLeft: FPoint) =
 proc selected(toolbar: Toolbar, button: Button, state: ToolbarState): bool =
   case button.kind
   of PassButton: state.passthrough
-  of ToolButton: not state.passthrough and ToolOrder[button.index].tool == state.tool
+  of ToolButton: not (state.passthrough or state.selecting) and
+    ToolOrder[button.index].tool == state.tool
   of FillButton: state.fill and state.tool in Fillable
   of ColorButton: button.index == state.color
   of WidthButton: abs(toolbar.presets[button.index] - state.width) < 0.01
+  of CaptureButton: state.selecting
 
 proc build(toolbar: var Toolbar, state: ToolbarState, palette: openArray[FColor]) =
   template mesh: untyped = toolbar.mesh
@@ -289,6 +295,14 @@ proc build(toolbar: var Toolbar, state: ToolbarState, palette: openArray[FColor]
     of WidthButton:
       let thickness = [2'f32, 4.5, 8][button.index]   # by rank: the presets can be anything
       mesh.addPath([FPoint(x: c.x - 8, y: c.y), FPoint(x: c.x + 8, y: c.y)], thickness, IconColor)
+    of CaptureButton:   # camera: body with a bump on top, and the lens
+      mesh.lines(c, [(-0.9'f32, -0.45'f32), (-0.35, -0.45), (-0.2, -0.75), (0.2, -0.75),
+                     (0.35, -0.45), (0.9, -0.45), (0.9, 0.7), (-0.9, 0.7), (-0.9, -0.45)])
+      var lens: seq[(float32, float32)]
+      for i in 0 .. 20:
+        let angle = float32(i) / 20 * 2 * float32(PI)
+        lens.add((cos(angle) * 0.38'f32, 0.12'f32 + sin(angle) * 0.38'f32))
+      mesh.lines(c, lens)
   toolbar.shown = state
   toolbar.built = true
 

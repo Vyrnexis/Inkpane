@@ -1,18 +1,20 @@
-import std/[os, strutils, tables]
+import std/[os, strutils, tables, uri]
 
 import dbus
 import glib
 
-# xdg-desktop-portal GlobalShortcuts client. Portal requests answer through
-# Request::Response signals, which arrive while we pump the GLib main context.
+# xdg-desktop-portal client: GlobalShortcuts and Screenshot. Portal requests answer
+# through Request::Response signals, which arrive while we pump the GLib main context.
 
 const
   PortalBusName = "org.freedesktop.portal.Desktop"
   PortalObjectPath = "/org/freedesktop/portal/desktop"
   GlobalShortcutsInterface = "org.freedesktop.portal.GlobalShortcuts"
+  ScreenshotInterface = "org.freedesktop.portal.Screenshot"
   RequestInterface = "org.freedesktop.portal.Request"
   SessionInterface = "org.freedesktop.portal.Session"
   InteractiveTimeoutSeconds = 300   # the user may be looking at a confirmation dialog
+  ScreenshotTimeoutSeconds = 120    # the first time, the desktop asks the user to allow it
 
 type
   PortalError* = object of IOError
@@ -85,7 +87,8 @@ proc newOptions(token: string): GVariantBuilder =
   if token.len > 0:
     result.addString("handle_token", token)
 
-proc portalRequest(methodName: string, buildParameters: proc(token: string): GVariant): GVariant =
+proc portalRequest(interfaceName, methodName: string, timeoutSeconds: int,
+    buildParameters: proc(token: string): GVariant): GVariant =
   # Returns the a{sv} results of a successful request; the caller must unref them.
   ensureSubscribed()
   let token = newToken()
@@ -93,7 +96,7 @@ proc portalRequest(methodName: string, buildParameters: proc(token: string): GVa
   let expectedPath = PortalObjectPath & "/request/" & sender & "/" & token
   let reply =
     try:
-      call(PortalBusName, PortalObjectPath, GlobalShortcutsInterface, methodName, buildParameters(token))
+      call(PortalBusName, PortalObjectPath, interfaceName, methodName, buildParameters(token))
     except DBusError:
       raise newException(PortalError, getCurrentExceptionMsg())
 
@@ -104,7 +107,7 @@ proc portalRequest(methodName: string, buildParameters: proc(token: string): GVa
 
   # Sleep in GLib until the Response signal (or the timeout) arrives.
   var timedOut = false
-  let timeout = g_timeout_add_seconds(InteractiveTimeoutSeconds, onTimeout, addr timedOut)
+  let timeout = g_timeout_add_seconds(cuint(timeoutSeconds), onTimeout, addr timedOut)
   defer:
     if not timedOut: discard g_source_remove(timeout)
   while true:
@@ -121,6 +124,10 @@ proc portalRequest(methodName: string, buildParameters: proc(token: string): GVa
           g_variant_unref(response.results)
           raise newException(PortalError, methodName & " was rejected by the desktop portal.")
     if timedOut:
+      try:   # take down any dialog the request left on screen
+        g_variant_unref(call(PortalBusName, handlePath, RequestInterface, "Close"))
+      except DBusError:
+        discard
       raise newException(PortalError, "Timed out waiting for the desktop portal.")
     discard g_main_context_iteration(nil, 1)
 
@@ -147,7 +154,8 @@ proc closeSession(handle: string) =
 proc bindShortcuts*(bindings: openArray[ShortcutBinding]): ShortcutSession =
   ## The desktop owns the final key assignment; triggers are suggestions it may show
   ## in a confirmation dialog the first time.
-  let createResults = portalRequest("CreateSession", proc(token: string): GVariant =
+  let createResults = portalRequest(GlobalShortcutsInterface, "CreateSession",
+      InteractiveTimeoutSeconds, proc(token: string): GVariant =
     let options = newOptions(token)
     options.addString("session_handle_token", newToken())
     g_variant_new("(@a{sv})", options.finish()))
@@ -161,7 +169,8 @@ proc bindShortcuts*(bindings: openArray[ShortcutBinding]): ShortcutSession =
   let shortcutList = @bindings
   result = ShortcutSession(sessionHandle: sessionHandle)
   try:
-    let results = portalRequest("BindShortcuts", proc(token: string): GVariant =
+    let results = portalRequest(GlobalShortcutsInterface, "BindShortcuts",
+        InteractiveTimeoutSeconds, proc(token: string): GVariant =
       let shortcuts = newBuilder("a(sa{sv})")
       for binding in shortcutList:
         let details = newOptions("")
@@ -196,3 +205,25 @@ proc takeActivated*(session: ShortcutSession): seq[string] =
     if activation.session == session.sessionHandle:
       result.add(activation.id)
   activatedShortcuts.setLen(0)
+
+############################
+# Screenshot
+############################
+
+proc takeScreenshot*(): string =
+  ## Screenshot of the whole desktop, without a dialog; returns the PNG's path. The
+  ## portal writes the file and the caller owns it from then on.
+  let results = portalRequest(ScreenshotInterface, "Screenshot", ScreenshotTimeoutSeconds,
+    proc(token: string): GVariant =
+      let options = newOptions(token)
+      g_variant_builder_add(options, "{sv}", "interactive".cstring, g_variant_new_boolean(0))
+      g_variant_new("(s@a{sv})", "".cstring, options.finish()))
+  let uriValue = g_variant_lookup_value(results, "uri", variantType("s"))
+  g_variant_unref(results)
+  if uriValue.isNil:
+    raise newException(PortalError, "The desktop portal returned no screenshot.")
+  let address = parseUri($g_variant_get_string(uriValue, nil))
+  g_variant_unref(uriValue)
+  if address.scheme != "file":
+    raise newException(PortalError, "The screenshot is not a local file: " & $address)
+  decodeUrl(address.path, decodePlus = false)

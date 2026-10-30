@@ -26,6 +26,7 @@ type
     points*: seq[FPoint]  # pen: the path; shapes: [start, end] of the drag
     filled*: bool         # rectangle, diamond, ellipse: solid inside
     text*: string         # text: what was typed; marker: its number
+    byAi*: bool           # drawn through the MCP server, not by hand
 
   Change = object
     ## One undo step: `count` items from `index` on (one drawn or erased item, or all of
@@ -211,13 +212,22 @@ proc nextMarker(scene: Scene): int =
       result = max(result, parseInt(item.text))
   inc result
 
-proc addMarker*(scene: var Scene, center: FPoint, radius: float32, color: FColor) =
-  scene.items.add(Item(kind: Marker, color: color, width: radius * 2,
-    text: $scene.nextMarker,
-    points: @[FPoint(x: center.x - radius, y: center.y - radius),
-              FPoint(x: center.x + radius, y: center.y + radius)]))
-  scene.undoStack.add(Change(index: scene.items.high, count: 1, present: true))
+proc addItem*(scene: var Scene, item: Item) =
+  ## A finished item from outside (the MCP server). It goes in before an item the user
+  ## is still drawing, so their drag carries on; that moves the user's item, so the mesh
+  ## is rebuilt.
+  let at = scene.items.len - ord(scene.drawing)
+  scene.items.insert(item, at)
+  if scene.drawing:
+    inc scene.revision
+  scene.undoStack.add(Change(index: at, count: 1, present: true))
   scene.redoStack.setLen(0)
+
+proc addMarker*(scene: var Scene, center: FPoint, radius: float32, color: FColor,
+    byAi = false) =
+  scene.addItem(Item(kind: Marker, color: color, width: radius * 2, text: $scene.nextMarker,
+    points: @[FPoint(x: center.x - radius, y: center.y - radius),
+              FPoint(x: center.x + radius, y: center.y + radius)], byAi: byAi))
 
 ############################
 # Eraser
@@ -266,14 +276,18 @@ proc flip(scene: var Scene, change: var Change) =
   change.present = not change.present
   inc scene.revision
 
+proc removeAt*(scene: var Scene, index: int) =
+  ## Removes one item as an undo step, like the eraser does.
+  var change = Change(index: index, count: 1, present: true)
+  scene.flip(change)
+  scene.undoStack.add(change)
+  scene.redoStack.setLen(0)
+
 proc eraseAt*(scene: var Scene, p: FPoint): bool =
   ## Removes every item under the eraser; each removal is its own undo step.
   for i in countdown(scene.items.high, 0):
     if scene.items[i].touches(p):
-      var change = Change(index: i, count: 1, present: true)
-      scene.flip(change)
-      scene.undoStack.add(change)
-      scene.redoStack.setLen(0)
+      scene.removeAt(i)
       result = true
 
 proc eraseAlong*(scene: var Scene, a, b: FPoint): bool =
@@ -282,6 +296,32 @@ proc eraseAlong*(scene: var Scene, a, b: FPoint): bool =
   for i in 1 .. steps:
     let t = float32(i) / float32(steps)
     if scene.eraseAt(FPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t)):
+      result = true
+
+############################
+# Drawn by the AI
+############################
+
+proc aiItem*(kind: Tool, points: seq[FPoint], color: FColor, width: float32, filled = false,
+    text = ""): Item =
+  ## An item as the MCP server describes it: shapes by two corners, arrows and lines by
+  ## tail and head, the pen by its path, text by its top-left corner.
+  Item(kind: kind, color: toolColor(kind, color), width: toolWidth(kind, width), byAi: true,
+    points: (if kind == Text: @[points[0], points[0]] else: points),
+    filled: filled and kind in Fillable, text: text)
+
+proc lastAi*(scene: Scene): int =
+  ## Index of the newest AI item, or -1.
+  for i in countdown(scene.items.high - ord(scene.drawing), 0):
+    if scene.items[i].byAi:
+      return i
+  -1
+
+proc clearAi*(scene: var Scene): bool =
+  ## Removes every AI item, the user's drawing stays; each is an undo step.
+  for i in countdown(scene.items.high - ord(scene.drawing), 0):
+    if scene.items[i].byAi:
+      scene.removeAt(i)
       result = true
 
 ############################

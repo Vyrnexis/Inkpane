@@ -39,6 +39,10 @@ visible = yes
 # Font file for text, step markers, tooltips and the F1 help. Empty: the desktop's
 # default sans-serif font. Text needs SDL3_ttf (package sdl3_ttf or libsdl3-ttf).
 font = ""
+
+[screenshot]
+# Folder for screenshots (Ctrl+S). Empty: Inkpane in your Pictures folder.
+folder = ""
 """
 
 type
@@ -51,6 +55,7 @@ type
     fill*: bool
     toolbar*: bool
     font*: string          # empty: ask fontconfig
+    screenshotFolder*: string   # empty: Pictures/Inkpane
 
 proc configPath*(): string =
   getConfigDir() / "inkpane" / "inkpane.conf"
@@ -61,7 +66,7 @@ proc statePath(): string =
 proc warn(message: string) =
   stderr.writeLine("inkpane: " & configPath() & ": " & message)
 
-proc parseColor(text: string): FColor =
+proc parseColor*(text: string): FColor =
   let hex = text.strip(chars = {'#', ' '})
   if hex.len != 6:
     raise newException(ValueError, "not a #rrggbb colour: " & text)
@@ -118,6 +123,8 @@ proc apply(settings: var Settings, file: Config) =
     if not fileExists(raw):
       raise newException(ValueError, "no such file: " & raw)
     settings.font = raw
+  read("screenshot", "folder"):
+    settings.screenshotFolder = raw
 
 proc loadSettings*(): Settings =
   ## Defaults, then the user's file; writes the documented defaults if there is none.

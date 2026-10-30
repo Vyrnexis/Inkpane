@@ -1,8 +1,8 @@
-import std/[math, parseopt, posix, strutils, tables]
+import std/[math, os, parseopt, posix, strutils, tables]
 
 import sdl3
 
-import inkpane/config
+import inkpane/[capture, config]
 import inkpane/desktop/[dbus, glib, portal, tray]
 import inkpane/draw/[render, scene, text, toolbar]
 import inkpane/wayland/overlay
@@ -13,6 +13,8 @@ import inkpane/wayland/overlay
 # click, or `inkpane --toggle` opens the overlay on every monitor; toggling again or Esc
 # closes it and clears the drawing. 1 / V switches to click-through: the drawing stays
 # while apps get the mouse and keyboard, until the toolbar or the toggle brings it back.
+# Ctrl+S saves a screenshot with the drawing on it. AI clients draw and take screenshots
+# through the D-Bus methods below, by way of the inkpane-mcp server.
 
 const
   MinWidth = 1'f32
@@ -36,6 +38,7 @@ const
     ("Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y", "Undo, redo"),
     ("C / Delete", "Clear (Ctrl+Z undoes it)"),
     ("Ctrl+W / Ctrl+B", "Whiteboard / blackboard"),
+    ("Ctrl+S", "Screenshot: drag an area, or click"),
     ("Tab", "Hide the toolbar"),
     ("F1", "This help"),
     ("Esc", "Cancel a drag, else close and clear")]
@@ -55,6 +58,33 @@ const
     <method name="Show"/>
     <method name="Hide"/>
     <method name="Quit"/>
+    <method name="Monitors">
+      <arg name="monitors" type="a(siiii)" direction="out"/>
+    </method>
+    <method name="Draw">
+      <arg name="monitor" type="i" direction="in"/>
+      <arg name="kind" type="s" direction="in"/>
+      <arg name="points" type="a(dd)" direction="in"/>
+      <arg name="color" type="s" direction="in"/>
+      <arg name="width" type="d" direction="in"/>
+      <arg name="filled" type="b" direction="in"/>
+      <arg name="text" type="s" direction="in"/>
+    </method>
+    <method name="Clear">
+      <arg name="aiOnly" type="b" direction="in"/>
+    </method>
+    <method name="UndoAi">
+      <arg name="removed" type="b" direction="out"/>
+    </method>
+    <method name="SetBoard">
+      <arg name="board" type="s" direction="in"/>
+    </method>
+    <method name="Capture">
+      <arg name="monitor" type="i" direction="in"/>
+      <arg name="width" type="i" direction="in"/>
+      <arg name="height" type="i" direction="in"/>
+      <arg name="path" type="s" direction="out"/>
+    </method>
   </interface>
 </node>"""
 
@@ -69,6 +99,17 @@ type
     CmdShow = "Show"
     CmdHide = "Hide"
     CmdQuit = "Quit"
+    CmdMonitors = "Monitors"
+    CmdDraw = "Draw"
+    CmdClear = "Clear"
+    CmdUndoAi = "UndoAi"
+    CmdSetBoard = "SetBoard"
+    CmdCapture = "Capture"
+
+  Call = object   # a D-Bus method call, answered once the main loop has run it
+    command: Command
+    parameters: GVariant
+    invocation: pointer
 
   Board = enum
     Transparent, Whiteboard, Blackboard
@@ -96,15 +137,23 @@ type
     hoverButton: int
     hoverSince: uint64
     tooltip: bool        # hovered long enough: show it
+    selecting: bool      # Ctrl+S: the next drag or click picks what to capture
+    selectOn: Overlay    # overlay of that drag
+    selectFrom, selectTo: FPoint
+    capturing: bool      # a clean frame for a screenshot: none of Inkpane's own UI
+    aiOrder: seq[Overlay]   # overlay of each AI item, oldest first, for UndoAi
     warnedNoText: bool
     running: bool
     shortcuts: ShortcutSession
 
-var pendingCommands: seq[Command]   # filled by D-Bus callbacks, drained by the main loop
+  ActionError = object of CatchableError
 
-proc notifyError(message: string) =
-  # Desktop notification so errors are visible even though Inkpane has no window.
-  stderr.writeLine("inkpane: " & message)
+var
+  pendingCommands: seq[Command]   # from the tray, the shortcut, keys and signals
+  pendingCalls: seq[Call]         # from our D-Bus service
+
+proc notify(message: string) =
+  # Desktop notification: Inkpane has no window to say things in.
   try:
     g_variant_unref(call("org.freedesktop.Notifications", "/org/freedesktop/Notifications",
       "org.freedesktop.Notifications", "Notify",
@@ -112,6 +161,10 @@ proc notifyError(message: string) =
         "Inkpane".cstring, message.cstring, pointer(nil), pointer(nil), -1'i32)))
   except DBusError:
     discard
+
+proc notifyError(message: string) =
+  stderr.writeLine("inkpane: " & message)
+  notify(message)
 
 proc textSize(width: float32): float32 =
   ## Text follows the width setting: 6 (the default) gives 27 px.
@@ -151,7 +204,8 @@ proc toolbarHit(app: App, overlay: Overlay): int =
 
 proc toolbarState(app: App, overlay: Overlay): ToolbarState =
   ToolbarState(tool: app.tool, color: app.settings.palette.find(app.color), width: app.width,
-    fill: app.fill, passthrough: app.passthrough, hover: app.toolbarHit(overlay))
+    fill: app.fill, passthrough: app.passthrough, selecting: app.selecting,
+    hover: app.toolbarHit(overlay))
 
 proc toolbarInTheWay(app: App, overlay: Overlay): bool =
   ## While dragging under or near the toolbar it steps aside, so it never covers a stroke.
@@ -243,7 +297,45 @@ proc drawHelp(overlay: Overlay) =
   discard overlay.renderer.drawText(overlay.texts, actionText,
     FPoint(x: left + 28 + keySize.x + gap, y: top + 24), HelpSize, TextColor, false, overlay.scale)
 
-proc redraw(app: App, overlay: Overlay) =
+proc rectPath(r: FRect): seq[FPoint] =
+  @[FPoint(x: r.x, y: r.y), FPoint(x: r.x + r.w, y: r.y), FPoint(x: r.x + r.w, y: r.y + r.h),
+    FPoint(x: r.x, y: r.y + r.h), FPoint(x: r.x, y: r.y)]
+
+proc selection(app: App): FRect =
+  let a = app.selectFrom
+  let b = app.selectTo
+  FRect(x: min(a.x, b.x), y: min(a.y, b.y), w: abs(b.x - a.x), h: abs(b.y - a.y))
+
+proc drawSelection(app: App, overlay: Overlay) =
+  ## Capture mode: the screen dimmed except the area being dragged, and how it works.
+  const Dim = FColor(r: 0, g: 0, b: 0, a: 0.3)
+  var mesh: Mesh
+  mesh.setPixelSize(overlay.mesh.pixelSize)
+  let w = overlay.width
+  let h = overlay.height
+  if app.selectOn == overlay:
+    let r = app.selection
+    for band in [FRect(w: w, h: r.y), FRect(y: r.y + r.h, w: w, h: h - r.y - r.h),
+                 FRect(y: r.y, w: r.x, h: r.h), FRect(x: r.x + r.w, y: r.y, w: w - r.x - r.w, h: r.h)]:
+      if band.w > 0 and band.h > 0:
+        mesh.addFill(rectPath(band), Dim)
+    mesh.addPath(rectPath(r), 3, FColor(r: 0, g: 0, b: 0, a: 0.45))
+    mesh.addPath(rectPath(r), 1.5, FColor(r: 1, g: 1, b: 1, a: 1))
+  else:
+    mesh.addFill(rectPath(FRect(w: w, h: h)), Dim)
+  overlay.renderer.draw(mesh)
+  if textAvailable() and app.selectOn != overlay:
+    const Hint = "Drag an area     Click  whole screen     Esc  cancel"
+    let size = measureText(Hint, TooltipSize)
+    let x = round((w - size.x) / 2)
+    let y = h - size.y - 72
+    overlay.renderer.drawBackdrop(FRect(x: x - 8, y: y - 4, w: size.x + 16, h: size.y + 8),
+      overlay.mesh.pixelSize)
+    discard overlay.renderer.drawText(overlay.texts, Hint, FPoint(x: x, y: y), TooltipSize,
+      TextColor, false, overlay.scale)
+
+proc render(app: App, overlay: Overlay) =
+  ## One frame, not yet presented.
   let renderer = overlay.renderer
   let background = Boards[ord(app.board)]
   discard renderer.setRenderDrawColorFloat(background.r, background.g, background.b, background.a)
@@ -253,21 +345,32 @@ proc redraw(app: App, overlay: Overlay) =
   renderer.draw(overlay.mesh)
   renderer.drawActiveShape(overlay.mesh, overlay.scene)
   overlay.drawTexts(background)
-  let toolbarShown = not app.hideToolbar and not app.toolbarInTheWay(overlay)
+  # While capturing, only the drawing: none of Inkpane's own UI ends up in the screenshot.
+  let toolbarShown = not (app.hideToolbar or app.capturing) and not app.toolbarInTheWay(overlay)
   if toolbarShown:
     overlay.toolbar.update(FPoint(x: overlay.width, y: overlay.height), app.toolbarPlace,
       overlay.mesh.pixelSize, app.toolbarState(overlay), app.settings.palette, app.settings.presets)
     renderer.draw(overlay.toolbar)
+  if app.selecting and not app.capturing:
+    app.drawSelection(overlay)
   let overToolbar = toolbarShown and overlay.pointer in overlay.toolbar.bounds
   if overlay.pointerInside and not overlay.scene.drawing and not overToolbar and
-      not app.passthrough:
+      not (app.passthrough or app.capturing):
     # Preview of what a click or drag makes, at its real size, with a dark halo so it
     # shows on both light and dark content: the pen tip, the eraser, the marker, or a
     # text cursor as tall as a line of text.
     let p = overlay.pointer
     let color = if app.tool == Eraser: FColor(r: 1, g: 1, b: 1, a: 0.9)
                 else: toolColor(app.tool, app.color).onBackground(background)
-    if app.tool == Text:
+    if app.selecting:   # crosshair
+      for (width, ink) in [(4'f32, FColor(r: 0, g: 0, b: 0, a: 0.45)),
+                           (1.5'f32, FColor(r: 1, g: 1, b: 1, a: 1))]:
+        var cross: Mesh
+        cross.setPixelSize(overlay.mesh.pixelSize)
+        cross.addPath([FPoint(x: p.x - 12, y: p.y), FPoint(x: p.x + 12, y: p.y)], width, ink)
+        cross.addPath([FPoint(x: p.x, y: p.y - 12), FPoint(x: p.x, y: p.y + 12)], width, ink)
+        renderer.draw(cross)
+    elif app.tool == Text:
       let half = lineHeight(textSize(app.width)) / 2
       let serif = max(half / 4, 3)
       for (width, ink) in [(4'f32, FColor(r: 0, g: 0, b: 0, a: 0.45)), (1.5'f32, color)]:
@@ -284,14 +387,17 @@ proc redraw(app: App, overlay: Overlay) =
         else: max(toolWidth(app.tool, app.width) / 2, 2)
       renderer.drawRing(p, radius + 1, 3, FColor(r: 0, g: 0, b: 0, a: 0.45))
       renderer.drawRing(p, radius, 1.5, color)
-  if overlay.scene.editingText:
+  if overlay.scene.editingText and not app.capturing:
     overlay.drawTypingHint()
   if toolbarShown and app.tooltip and app.hoverOn == overlay:
     app.drawTooltip(overlay)
-  if app.help:
+  if app.help and not app.capturing:
     overlay.drawHelp()
   overlay.texts.endFrame()
-  discard renderer.renderPresent()
+
+proc redraw(app: App, overlay: Overlay) =
+  app.render(overlay)
+  discard overlay.renderer.renderPresent()
   overlay.dirty = false
 
 proc follow(app: var App, overlay: Overlay, point: FPoint) =
@@ -355,14 +461,103 @@ proc typingKey(app: var App, event: KeyboardEvent) =
     discard
   app.typingOn.dirty = true
 
+############################
+# Screenshots
+############################
+
+proc runtimeDir(): string =
+  result = getEnv("XDG_RUNTIME_DIR", getTempDir()) / "inkpane"
+  createDir(result)
+
+proc grabDesktop(app: var App): string =
+  ## A screenshot of the whole desktop, drawing included but none of Inkpane's own UI;
+  ## returns the PNG's path. Input is released meanwhile, so a permission dialog from the
+  ## desktop (the first time) is never covered by the overlay.
+  if not pngAvailable():
+    raise newException(ActionError, "Screenshots need SDL 3.4 or SDL3_image.")
+  app.capturing = true
+  for round in 1 .. 2:   # the second present waits until the first, clean one is shown
+    for overlay in app.overlays:
+      app.redraw(overlay)
+  for overlay in app.overlays:
+    overlay.setPassthrough(true, FRect())
+  try:
+    let fake = getEnv("INKPANE_TEST_SCREENSHOT")   # tests: this PNG instead of the portal,
+    if fake.len > 0:                                # with the drawing laid over it
+      result = runtimeDir() / "test-shot.png"
+      var layers: seq[ptr Surface]
+      for overlay in app.overlays:
+        app.render(overlay)
+        layers.add(overlay.renderer.renderReadPixels(nil))
+        discard overlay.renderer.renderPresent()
+      let ok = composite(fake, result, monitors(), layers)
+      for layer in layers:
+        if not layer.isNil: destroySurface(layer)
+      if not ok:
+        raise newException(ActionError, "Could not compose the test screenshot.")
+    else:
+      result = takeScreenshot()
+  finally:
+    app.capturing = false
+    app.setPassthrough(app.passthrough)   # input back, and the UI redrawn
+
+proc capture(app: var App, monitor: int, area: Rect, width, height: int, path: string) =
+  ## Saves `area` of `monitor` (zero size: all of it) to `path`, scaled to width × height.
+  let shot = app.grabDesktop()
+  let image = crop(shot, monitors(), monitor, area, width, height)
+  try:
+    removeFile(shot)   # the portal's copy: ours is saved below
+  except OSError:
+    discard
+  if image.isNil:
+    raise newException(ActionError, "Could not read the screenshot: " & $getError())
+  defer: destroySurface(image)
+  if not save(image, path):
+    raise newException(ActionError, "Could not save " & path & ": " & $getError())
+
+proc screenshot(app: var App, overlay: Overlay, area: Rect) =
+  ## Ctrl+S: saves into the screenshot folder and puts it on the clipboard.
+  let path = newScreenshotPath(screenshotFolder(app.settings.screenshotFolder))
+  try:
+    app.capture(app.overlays.find(overlay), area, 0, 0, path)
+  except CatchableError:
+    notifyError("Screenshot failed: " & getCurrentExceptionMsg())
+    return
+  let shown = if path.startsWith(getHomeDir()): "~/" & path.relativePath(getHomeDir()) else: path
+  notify("Screenshot saved to " & shown &
+    (if copyToClipboard(path): " and copied to the clipboard." else: "."))
+
+proc startSelecting(app: var App, on: bool) =
+  if on and not pngAvailable():
+    notifyError("Screenshots need SDL 3.4 (or SDL3_image): update SDL3 and restart Inkpane.")
+    return
+  app.selecting = on
+  app.selectOn = nil
+  app.markAllDirty()
+
+proc finishSelecting(app: var App) =
+  ## Mouse up in capture mode: a drag captures that area, a click the whole monitor.
+  let overlay = app.selectOn
+  let r = app.selection
+  app.startSelecting(false)
+  let area = if r.w >= 4 and r.h >= 4: Rect(x: cint(r.x), y: cint(r.y), w: cint(r.w), h: cint(r.h))
+             else: Rect()
+  app.screenshot(overlay, area)
+
 proc press(app: var App, button: Button) =
   if button.kind == PassButton:
+    app.startSelecting(false)
     app.setPassthrough(not app.passthrough)
     return
   if app.passthrough:   # picking anything else goes back to drawing, as in Excalidraw
     app.setPassthrough(false)
+  if button.kind == CaptureButton:
+    app.startSelecting(not app.selecting)
+    return
+  if button.kind == ToolButton:
+    app.startSelecting(false)
   case button.kind
-  of PassButton: discard
+  of PassButton, CaptureButton: discard
   of ToolButton: app.tool = ToolOrder[button.index].tool
   of FillButton: app.fill = not app.fill
   of ColorButton: app.color = app.settings.palette[button.index]
@@ -397,6 +592,7 @@ proc handleKey(app: var App, event: KeyboardEvent) =
     for key in ToolOrder:
       if key.keyFor(event):
         app.tool = key.tool
+        app.selecting = false
         app.markAllDirty()
         return
   case event.key
@@ -405,6 +601,8 @@ proc handleKey(app: var App, event: KeyboardEvent) =
       app.drawingOn.scene.cancel()
       app.drawingOn.dirty = true
       app.drawingOn = nil
+    elif app.selecting:
+      app.startSelecting(false)
     elif app.help:
       app.help = false
       app.markAllDirty()
@@ -430,6 +628,9 @@ proc handleKey(app: var App, event: KeyboardEvent) =
     if ctrl and target != nil:
       let changed = if shift: target.scene.redo() else: target.scene.undo()
       target.dirty = target.dirty or changed
+  of SDLK_S:
+    if ctrl and app.drawingOn == nil:
+      app.startSelecting(not app.selecting)
   of SDLK_W, SDLK_B:
     if ctrl:   # Ctrl+W whiteboard, Ctrl+B blackboard; the same key again goes back
       let board = if event.key == SDLK_W: Whiteboard else: Blackboard
@@ -470,6 +671,8 @@ proc handleEvent(app: var App, event: Event) =
     overlay.pointerInside = true
     if app.drawingOn == overlay:
       app.follow(overlay, point)
+    elif app.selectOn == overlay:
+      app.selectTo = point
     elif app.movingToolbar == overlay:
       app.toolbarPlace = FPoint(x: point.x - app.grab.x, y: point.y - app.grab.y)
       app.markAllDirty()
@@ -489,6 +692,14 @@ proc handleEvent(app: var App, event: Event) =
         if int(button) == BUTTON_LEFT:   # the background between buttons is the handle
           app.movingToolbar = overlay
           app.grab = FPoint(x: point.x - app.toolbarPlace.x, y: point.y - app.toolbarPlace.y)
+        return
+      if app.selecting:   # left drag picks the area, right click cancels
+        if int(button) == BUTTON_LEFT:
+          app.selectOn = overlay
+          app.selectFrom = point
+          app.selectTo = point
+        else:
+          app.startSelecting(false)
         return
       app.dragTool = if int(button) == BUTTON_RIGHT: Eraser else: app.tool
       if app.dragTool in Placed:
@@ -514,6 +725,10 @@ proc handleEvent(app: var App, event: Event) =
       saveToolbarPlace(app.toolbarPlace)
       if app.passthrough:
         app.setPassthrough(true)   # the clickable area moved with the toolbar
+      return
+    if app.selectOn != nil and int(event.button.button) == BUTTON_LEFT:
+      app.selectTo = FPoint(x: event.button.x, y: event.button.y)
+      app.finishSelecting()
       return
     if app.drawingOn != nil and event.button.button == app.dragButton:
       let mods = getModState()
@@ -569,6 +784,9 @@ proc hideOverlays(app: var App) =
   app.help = false
   app.passthrough = false
   app.board = Transparent   # the next session starts over the desktop again
+  app.selecting = false
+  app.selectOn = nil
+  app.aiOrder.setLen(0)
   setTrayDrawing(false)
 
 proc runCommand(app: var App, command: Command) =
@@ -581,16 +799,139 @@ proc runCommand(app: var App, command: Command) =
     if app.passthrough: app.setPassthrough(false) else: app.showOverlays()
   of CmdHide: app.hideOverlays()
   of CmdQuit: app.running = false
-  of CmdNone: discard
+  of CmdNone, CmdMonitors .. CmdCapture: discard   # D-Bus calls with arguments: answer()
+
+############################
+# Drawn by an AI (inkpane-mcp)
+############################
+
+proc openForAi(app: var App) =
+  ## The AI draws without taking the mouse and keyboard: a closed overlay opens in
+  ## click-through. One the user is drawing on stays as it is.
+  if app.drawing:
+    return
+  app.showOverlays()
+  if not app.drawing:
+    raise newException(ActionError, "Could not open the overlay.")
+  app.setPassthrough(true)
+
+proc aiDraw(app: var App, parameters: GVariant) =
+  var monitor: int32
+  var kind, color, text: cstring
+  var points: GVariant
+  var width: cdouble
+  var filled: cint
+  g_variant_get(parameters, "(i&s@a(dd)&sdb&s)", addr monitor, addr kind, addr points,
+    addr color, addr width, addr filled, addr text)
+  var path: seq[FPoint]
+  for i in 0 ..< int(g_variant_n_children(points)):
+    let point = g_variant_get_child_value(points, csize_t(i))
+    var x, y: cdouble
+    g_variant_get(point, "(dd)", addr x, addr y)
+    g_variant_unref(point)
+    path.add(FPoint(x: float32(x), y: float32(y)))
+  g_variant_unref(points)
+
+  var tool = Pen
+  var found = false
+  for t in Tool:
+    if t != Eraser and cmpIgnoreCase($t, $kind) == 0:
+      tool = t
+      found = true
+  if not found:
+    raise newException(ValueError, "Unknown kind: " & $kind)
+  let needed = if tool in Placed: 1 else: 2
+  if path.len < needed or (tool notin Placed + {Pen} and path.len != 2):
+    raise newException(ValueError, $kind & " needs " &
+      (if tool in Placed: "1 point" elif tool == Pen: "2 or more points" else: "2 points"))
+  if tool == Text and ($text).len == 0:
+    raise newException(ValueError, "Text needs some text.")
+  let ink = if ($color).len == 0: app.settings.palette[0] else: parseColor($color)
+  if tool in Placed and app.textMissing:
+    raise newException(ValueError, "Text and step markers need SDL3_ttf, which is not installed.")
+  if monitor notin 0'i32 ..< int32(monitors().len):
+    raise newException(ValueError, "No monitor " & $monitor)
+
+  app.openForAi()
+  if monitor >= app.overlays.len:
+    raise newException(ValueError, "No overlay on monitor " & $monitor)
+  let overlay = app.overlays[monitor]
+  let size = float32(width)
+  case tool
+  of Marker:
+    overlay.scene.addMarker(path[0], (if size > 0: size else: 15), ink, byAi = true)
+  of Text:
+    overlay.scene.addItem(aiItem(Text, path, ink, (if size > 0: size else: 24), text = $text))
+  else:
+    overlay.scene.addItem(aiItem(tool, path, ink, (if size > 0: size else: 4), filled != 0))
+  app.aiOrder.add(overlay)
+  overlay.dirty = true
+
+proc aiUndo(app: var App): bool =
+  ## Removes the newest AI item that is still on screen.
+  while app.aiOrder.len > 0:
+    let overlay = app.aiOrder.pop()
+    let index = overlay.scene.lastAi
+    if overlay in app.overlays and index >= 0:
+      overlay.scene.removeAt(index)
+      overlay.dirty = true
+      return true
+
+proc answer(app: var App, command: Command, parameters: GVariant): GVariant =
+  ## Runs a call to our D-Bus service; the result is its reply.
+  case command
+  of CmdNone, CmdToggle .. CmdQuit:
+    app.runCommand(command)
+  of CmdMonitors:
+    let list = newBuilder("a(siiii)")
+    for m in monitors():
+      g_variant_builder_add(list, "(siiii)", m.name.cstring, m.bounds.x, m.bounds.y,
+        m.bounds.w, m.bounds.h)
+    result = g_variant_new("(@a(siiii))", list.finish())
+  of CmdDraw:
+    app.aiDraw(parameters)
+  of CmdClear:
+    var aiOnly: cint
+    g_variant_get(parameters, "(b)", addr aiOnly)
+    for overlay in app.overlays:
+      if aiOnly != 0: discard overlay.scene.clearAi() else: overlay.scene.clear()
+      overlay.dirty = true
+    app.aiOrder.setLen(0)
+  of CmdUndoAi:
+    result = g_variant_new("(b)", cint(app.aiUndo()))
+  of CmdSetBoard:
+    var name: cstring
+    g_variant_get(parameters, "(&s)", addr name)
+    let board = case $name
+      of "none": Transparent
+      of "whiteboard": Whiteboard
+      of "blackboard": Blackboard
+      else: raise newException(ValueError, "Board must be none, whiteboard or blackboard.")
+    app.openForAi()
+    app.board = board
+    app.markAllDirty()
+  of CmdCapture:
+    var monitor, width, height: int32
+    g_variant_get(parameters, "(iii)", addr monitor, addr width, addr height)
+    if monitor notin 0'i32 ..< int32(monitors().len):
+      raise newException(ValueError, "No monitor " & $monitor)
+    if width < 0 or height < 0 or width > 16384 or height > 16384:
+      raise newException(ValueError, "Bad size " & $width & " × " & $height)
+    let path = runtimeDir() / "capture.png"
+    app.capture(monitor, Rect(), width, height, path)
+    result = g_variant_new("(s)", path.cstring)
 
 ############################
 # Background Services
 ############################
 
 proc serviceMethod(methodName: string, parameters: GVariant, invocation: pointer) =
-  for command in CmdToggle .. CmdQuit:
+  # Answered from the main loop (answerCalls), which may take a while for Capture.
+  for command in CmdToggle .. CmdCapture:
     if methodName == $command:
-      pendingCommands.add(command)
+      pendingCalls.add(Call(command: command, parameters: g_variant_ref(parameters),
+        invocation: invocation))
+      return
   reply(invocation)
 
 proc bindToggleShortcut(app: var App) =
@@ -643,6 +984,15 @@ proc collectCommands(app: var App) =
   pendingCommands.setLen(0)
   for command in commands:
     app.runCommand(command)
+  let calls = pendingCalls
+  pendingCalls.setLen(0)
+  for call in calls:
+    try:
+      reply(call.invocation, app.answer(call.command, call.parameters))
+    except CatchableError:
+      g_dbus_method_invocation_return_dbus_error(call.invocation,
+        "org.vyrnexis.Inkpane.Error.Failed", getCurrentExceptionMsg().cstring)
+    g_variant_unref(call.parameters)
 
 proc onWaylandReadable(fd: cint, condition: cuint, data: pointer): cint {.cdecl.} =
   # Only wakes the idle loop; SDL reads the events. A hang-up means the compositor is gone.

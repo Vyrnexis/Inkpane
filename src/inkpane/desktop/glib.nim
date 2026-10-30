@@ -89,6 +89,7 @@ proc g_variant_get_uint32*(value: GVariant): uint32 {.cdecl, importc, dynlib: gl
 proc g_variant_get_string*(value: GVariant, length: ptr csize_t): cstring {.cdecl, importc, dynlib: glibLib.}
 proc g_variant_lookup_value*(dictionary: GVariant, key: cstring, expectedType: pointer): GVariant {.cdecl, importc, dynlib: glibLib.}
 proc g_variant_unref*(value: GVariant) {.cdecl, importc, dynlib: glibLib.}
+proc g_variant_ref*(value: GVariant): GVariant {.cdecl, importc, dynlib: glibLib.}
 proc g_variant_builder_new*(variantType: pointer): GVariantBuilder {.cdecl, importc, dynlib: glibLib.}
 proc g_variant_builder_add*(builder: GVariantBuilder, format: cstring) {.cdecl, importc, dynlib: glibLib, varargs.}
 proc g_variant_builder_end*(builder: GVariantBuilder): GVariant {.cdecl, importc, dynlib: glibLib.}
