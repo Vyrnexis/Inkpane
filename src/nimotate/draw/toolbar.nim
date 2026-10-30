@@ -30,6 +30,7 @@ const
   SelectedColor = FColor(r: 0.42, g: 0.46, b: 0.98, a: 0.55)
   HoverColor = FColor(r: 1, g: 1, b: 1, a: 0.10)
   IconColor = FColor(r: 0.93, g: 0.93, b: 0.95, a: 1)
+  DimIconColor = FColor(r: 0.45, g: 0.45, b: 0.50, a: 1)   # fill, when the tool has no inside
   DigitColor = FColor(r: 0.58, g: 0.58, b: 0.64, a: 1)
   SwatchEdgeColor = FColor(r: 0.45, g: 0.45, b: 0.50, a: 1)
 
@@ -186,7 +187,7 @@ proc selected(button: Button, state: ToolbarState): bool =
   case button.kind
   of PassButton: state.passthrough
   of ToolButton: not state.passthrough and ToolOrder[button.index][0] == state.tool
-  of FillButton: state.fill
+  of FillButton: state.fill and state.tool in Fillable
   of ColorButton: button.index == state.color
   of WidthButton: abs(WidthPresets[button.index] - state.width) < 0.01
 
@@ -217,10 +218,19 @@ proc build(toolbar: var Toolbar, state: ToolbarState, palette: openArray[FColor]
       mesh.addIcon(tool, FPoint(x: c.x - 1.5, y: c.y - 1.5))
       mesh.addDigit(digit, FPoint(x: c.x + 9.5, y: c.y + 3.5))  # on pixel centres: crisp at 100 %
     of FillButton:
-      let square = scaled(c, [(-0.7'f32, -0.7'f32), (0.7, -0.7), (0.7, 0.7), (-0.7, 0.7), (-0.7, -0.7)])
-      if state.fill:
-        mesh.addFill(square, IconColor)
-      mesh.addPath(square, IconStroke, IconColor)
+      # The current shape, solid or outlined; dimmed while the tool cannot be filled.
+      let fillable = state.tool in Fillable
+      let shape = if fillable: state.tool else: Rectangle
+      let half = case shape
+        of Rectangle: (x: 0.8'f32, y: 0.6'f32)
+        of Ellipse: (x: 0.85'f32, y: 0.7'f32)
+        else: (x: 0.85'f32, y: 0.85'f32)
+      let corners = scaled(c, [(-half.x, -half.y), (half.x, half.y)])
+      let color = if fillable: IconColor else: DimIconColor
+      for path in Item(kind: shape, points: corners).outline():
+        if state.fill:
+          mesh.addFill(path, color)
+        mesh.addPath(path, IconStroke, color)
     of ColorButton:
       mesh.addDisc(c, 9, SwatchEdgeColor)
       mesh.addDisc(c, 8, palette[button.index])
