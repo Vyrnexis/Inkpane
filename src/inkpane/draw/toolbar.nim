@@ -6,7 +6,7 @@ import render, scene
 
 # Floating strip at the top centre of each monitor (or wherever it was dragged):
 # a grip to drag it by, click-through, tools, fill, colours, widths, screenshot.
-# Icons and key digits are drawn as lines with the same mesh code as the drawing, so the
+# Icons and key letters are drawn as lines with the same mesh code as the drawing, so the
 # toolbar needs no font and no image files. The mesh is rebuilt only when what the
 # toolbar shows (tool, colour, width, fill, hovered button) changes.
 
@@ -45,7 +45,7 @@ const
   HoverColor = FColor(r: 1, g: 1, b: 1, a: 0.10)
   IconColor = FColor(r: 0.93, g: 0.93, b: 0.95, a: 1)
   DimIconColor = FColor(r: 0.45, g: 0.45, b: 0.50, a: 1)   # fill, when the tool has no inside
-  DigitColor = FColor(r: 0.58, g: 0.58, b: 0.64, a: 1)
+  KeyColor = FColor(r: 0.58, g: 0.58, b: 0.64, a: 1)
   SwatchEdgeColor = FColor(r: 0.45, g: 0.45, b: 0.50, a: 1)
 
 type
@@ -117,7 +117,7 @@ proc layout(toolbar: var Toolbar, screen, place: FPoint, colors: int) =
   add(CaptureButton, 0, ButtonSize)
   let width = x + Padding
   let height = ButtonSize + 2 * Padding
-  # Whole pixels keep the key digits crisp; clamped so a drag never loses it off screen.
+  # Whole pixels keep the key letters crisp; clamped so a drag never loses it off screen.
   let left = clamp(round((screen.x - width) / 2 + place.x), 0, max(screen.x - width, 0))
   let top = clamp(round(TopMargin + place.y), 0, max(screen.y - height, 0))
   for button in toolbar.buttons.mitems:
@@ -137,10 +137,10 @@ proc label*(toolbar: Toolbar, button: Button): string =
   ## Tooltip: what the button does and its keys.
   case button.kind
   of GripButton: "Drag to move"
-  of PassButton: "Click-through   1 · V"
+  of PassButton: "Click-through   V · 1"
   of ToolButton:
     let key = ToolOrder[button.index]
-    ToolNames[key.tool] & "   " & (if key.digit >= 0: $key.digit & " · " else: "") & $key.letter
+    ToolNames[key.tool] & "   " & $key.letter & (if key.digit >= 0: " · " & $key.digit else: "")
   of FillButton: "Fill shapes   F"
   of ColorButton: "Colour   Shift+" & $(button.index + 1)
   of WidthButton: "Width " & formatFloat(toolbar.presets[button.index], precision = -1) & "   [ ]"
@@ -221,23 +221,31 @@ proc addIcon(mesh: var Mesh, tool: Tool, c: FPoint) =
     mesh.lines(c, [(-0.45'f32, -0.25'f32), (0.25, 0.45)])
     mesh.lines(c, [(0.1'f32, 0.85'f32), (0.9, 0.85)])
 
-proc addDigit(mesh: var Mesh, digit: int, topLeft: FPoint) =
-  ## Seven-segment digit, 4 × 8 logical px: still readable on a 100 % scale monitor.
+proc addLetter(mesh: var Mesh, letter: char, topLeft: FPoint) =
+  ## Key letter as strokes, 4 × 8 logical px: still readable on a 100 % scale monitor.
+  ## Mostly straight lines on whole pixels, so they stay crisp.
   const
     W = 4'f32
     H = 4'f32     # half height
-    Segments = [   # a b c d e f g
-      [(0'f32, 0'f32), (1'f32, 0'f32)], [(1'f32, 0'f32), (1'f32, 1'f32)],
-      [(1'f32, 1'f32), (1'f32, 2'f32)], [(0'f32, 2'f32), (1'f32, 2'f32)],
-      [(0'f32, 1'f32), (0'f32, 2'f32)], [(0'f32, 0'f32), (0'f32, 1'f32)],
-      [(0'f32, 1'f32), (1'f32, 1'f32)]]
-    Digits = ["abcdef", "bc", "abged", "abgcd", "fgbc", "afgcd", "afgedc", "abc",
-              "abcdefg", "abcdfg"]
-  for letter in Digits[digit]:
-    let segment = Segments[ord(letter) - ord('a')]
-    mesh.addPath([FPoint(x: topLeft.x + segment[0][0] * W, y: topLeft.y + segment[0][1] * H),
-                  FPoint(x: topLeft.x + segment[1][0] * W, y: topLeft.y + segment[1][1] * H)],
-                 1.2, DigitColor)
+  let strokes: seq[seq[(float32, float32)]] = case letter
+    of 'A': @[@[(0'f32, 2'f32), (0, 0), (1, 0), (1, 2)], @[(0'f32, 1'f32), (1, 1)]]
+    of 'D': @[@[(0'f32, 0'f32), (0.75, 0), (1, 0.5), (1, 1.5), (0.75, 2), (0, 2), (0, 0)]]
+    of 'E': @[@[(1'f32, 0'f32), (0, 0), (0, 2), (1, 2)], @[(0'f32, 1'f32), (0.75, 1)]]
+    of 'F': @[@[(1'f32, 0'f32), (0, 0), (0, 2)], @[(0'f32, 1'f32), (0.75, 1)]]
+    of 'H': @[@[(0'f32, 0'f32), (0, 2)], @[(1'f32, 0'f32), (1, 2)], @[(0'f32, 1'f32), (1, 1)]]
+    of 'L': @[@[(0'f32, 0'f32), (0, 2), (1, 2)]]
+    of 'N': @[@[(0'f32, 2'f32), (0, 0), (1, 2), (1, 0)]]
+    of 'O': @[@[(0'f32, 0'f32), (1, 0), (1, 2), (0, 2), (0, 0)]]
+    of 'P': @[@[(0'f32, 2'f32), (0, 0), (1, 0), (1, 1), (0, 1)]]
+    of 'R': @[@[(0'f32, 2'f32), (0, 0), (1, 0), (1, 1), (0, 1)], @[(0.5'f32, 1'f32), (1, 2)]]
+    of 'T': @[@[(0'f32, 0'f32), (1, 0)], @[(0.5'f32, 0'f32), (0.5, 2)]]
+    of 'V': @[@[(0'f32, 0'f32), (0.5, 2), (1, 0)]]
+    else: @[]
+  for stroke in strokes:
+    var path: seq[FPoint]
+    for (x, y) in stroke:
+      path.add(FPoint(x: topLeft.x + x * W, y: topLeft.y + y * H))
+    mesh.addPath(path, 1.2, KeyColor)
 
 proc selected(toolbar: Toolbar, button: Button, state: ToolbarState): bool =
   case button.kind
@@ -269,18 +277,17 @@ proc build(toolbar: var Toolbar, state: ToolbarState, palette: openArray[FColor]
     of GripButton:   # two columns of three dots: "drag me"
       for dx in [-2.5'f32, 2.5]:
         for dy in [-5'f32, 0, 5]:
-          mesh.addDisc(FPoint(x: c.x + dx, y: c.y + dy), 1.4, DigitColor)
+          mesh.addDisc(FPoint(x: c.x + dx, y: c.y + dy), 1.4, KeyColor)
     of PassButton:
       # Mouse cursor, as Excalidraw's select tool in the same place.
       mesh.lines(FPoint(x: c.x - 1.5, y: c.y - 1.5),
         [(-0.45'f32, -0.9'f32), (-0.45, 0.6), (-0.08, 0.22), (0.2, 0.85), (0.42, 0.75),
          (0.14, 0.12), (0.62, 0.1), (-0.45, -0.9)])
-      mesh.addDigit(1, FPoint(x: c.x + 9.5, y: c.y + 3.5))
+      mesh.addLetter('V', FPoint(x: c.x + 9.5, y: c.y + 3.5))
     of ToolButton:
       let key = ToolOrder[button.index]
       mesh.addIcon(key.tool, FPoint(x: c.x - 1.5, y: c.y - 1.5))
-      if key.digit >= 0:
-        mesh.addDigit(key.digit, FPoint(x: c.x + 9.5, y: c.y + 3.5))  # on pixel centres: crisp at 100 %
+      mesh.addLetter(key.letter, FPoint(x: c.x + 9.5, y: c.y + 3.5))  # on pixel centres: crisp at 100 %
     of FillButton:
       # The current shape, solid or outlined; dimmed while the tool cannot be filled.
       let fillable = state.tool in Fillable
@@ -295,6 +302,7 @@ proc build(toolbar: var Toolbar, state: ToolbarState, palette: openArray[FColor]
         if state.fill:
           mesh.addFill(path, color)
         mesh.addPath(path, IconStroke, color)
+      mesh.addLetter('F', FPoint(x: c.x + 9.5, y: c.y + 3.5))
     of ColorButton:
       mesh.addDisc(c, 9, SwatchEdgeColor)
       mesh.addDisc(c, 8, palette[button.index])
