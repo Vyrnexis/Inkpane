@@ -19,6 +19,7 @@ type
     strokes*: seq[Stroke]
     redoStack: seq[Stroke]
     active*: bool         # a stroke is being drawn right now
+    revision*: int        # bumped when strokes are removed or restored, not when they grow
     smoothed: FPoint
 
 proc distance(a, b: FPoint): float32 =
@@ -57,15 +58,18 @@ proc undo*(scene: var Scene): bool =
   if scene.active or scene.strokes.len == 0:
     return false
   scene.redoStack.add(scene.strokes.pop())
+  inc scene.revision
   true
 
 proc redo*(scene: var Scene): bool =
   if scene.active or scene.redoStack.len == 0:
     return false
   scene.strokes.add(scene.redoStack.pop())
+  inc scene.revision
   true
 
 proc clear*(scene: var Scene) =
   scene.strokes.setLen(0)
   scene.redoStack.setLen(0)
   scene.active = false
+  inc scene.revision

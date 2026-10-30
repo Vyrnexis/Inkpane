@@ -1,7 +1,7 @@
 import sdl3
 
 import layershell
-import ../draw/scene
+import ../draw/[render, scene]
 
 # One transparent, full-screen overlay window per monitor. Each SDL window is created
 # without a shell role and then turned into a wlr-layer-shell surface on its output.
@@ -17,6 +17,7 @@ type
     width*: float32       # logical size; mouse coordinates use the same units
     height*: float32
     scene*: Scene
+    mesh*: Mesh           # triangles of `scene`, kept between frames
     pointer*: FPoint
     pointerInside*: bool
     dirty*: bool

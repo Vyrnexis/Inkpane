@@ -75,7 +75,8 @@ proc redraw(app: App, overlay: Overlay) =
   let renderer = overlay.renderer
   discard renderer.setRenderDrawColor(0, 0, 0, 0)
   discard renderer.renderClear()
-  renderer.drawStrokes(overlay.scene.strokes)
+  overlay.mesh.update(overlay.scene)
+  renderer.draw(overlay.mesh)
   if overlay.pointerInside and not overlay.scene.active:
     # Preview of the pen tip: an outline in the pen colour with a dark halo so it shows
     # on both light and dark content.
