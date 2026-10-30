@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Nimotate
+GenericName=Screen Annotation
+Comment=Draw on your screen for tutorials, presentations and recordings
+Exec=@APP_BIN@
+Icon=org.vyrnexis.Nimotate
+Terminal=false
+Categories=Utility;Graphics;
+Keywords=draw;annotate;pen;screen;overlay;presentation;
+StartupNotify=false
+X-KDE-StartupNotify=false

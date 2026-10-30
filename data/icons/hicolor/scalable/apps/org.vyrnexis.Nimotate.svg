@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 1932 1932">
+  <defs>
+    <linearGradient id="side" x1="1300" y1="1000" x2="900" y2="1500" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#c3c5cb"/>
+      <stop offset="1" stop-color="#a3a6ae"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="1100" y1="300" x2="1700" y2="900" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffd93d"/>
+      <stop offset="1" stop-color="#d9a21a"/>
+    </linearGradient>
+    <linearGradient id="face" x1="1150" y1="450" x2="1650" y2="850" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f2c22c"/>
+      <stop offset="0.25" stop-color="#ffe45e"/>
+      <stop offset="0.6" stop-color="#e2ad22"/>
+      <stop offset="1" stop-color="#9c6e10"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1932" height="1932" fill="#1f2023"/>
+
+  <!-- nib facets -->
+  <path d="M1037 593L1382 932L1207 1300L600 1583L571 1597.1L544.1 1610.8L519.1 1624.2L496 1637L474.7 1649.4L455.2 1661.1L437.5 1672.2L421.3 1682.6L406.8 1692.3L393.8 1701.1L382.2 1709L372 1716L356.2 1721.7L343.4 1721.4L335.6 1715.6L335 1705L305 1690L298.3 1677.8L296.9 1664L299.8 1648.7L306 1632L420 1410L680 795Z" fill="#fdfdfd"/>
+  <path d="M1037 593L1074.8 630.2L498.9 1223.4L680 795Z" fill="#e7e8eb"/>
+  <path d="M1210.9 763.8L1382 932L1207 1300L600 1583L571 1597.1L544.1 1610.8L519.1 1624.2L496 1637L474.7 1649.4L455.2 1661.1L437.5 1672.2L421.3 1682.6L406.8 1692.3L393.8 1701.1L382.2 1709L372 1716L356.2 1721.7L343.4 1721.4L335.6 1715.6L335 1705L320.3 1697.6Z" fill="#d5d6da"/>
+  <path d="M1332.2 883.1L1382 932L1207 1300L751.1 1512.5Z" fill="url(#side)"/>
+
+  <!-- green tines -->
+  <path d="M600 1583L600 1583L571 1597.1L544.1 1610.8L519.1 1624.2L496 1637L474.7 1649.4L455.2 1661.1L437.5 1672.2L421.3 1682.6L406.8 1692.3L393.8 1701.1L382.2 1709L372 1716L356.2 1721.7L343.4 1721.4L335.6 1715.6L335 1705L305 1690L298.3 1677.8L296.9 1664L299.8 1648.7L306 1632L420 1410L420 1410Z" fill="#0f9a5e"/>
+  <path d="M507.5 1494.1L320.2 1697.6L305 1690L298.3 1677.8L296.9 1664L299.8 1648.7L306 1632L420 1410L420 1410Z" fill="#1bc475"/>
+
+  <!-- slit and breather hole -->
+  <path d="M872 1098L318 1700" stroke="#1f2023" stroke-width="30" stroke-linecap="round"/>
+  <circle cx="922" cy="1062" r="72" fill="#1f2023"/>
+
+  <!-- crown -->
+  <path d="M1045 515L1322 163L1298 440L1588 367L1540 657L1803 620L1462 918Z" fill="url(#rim)"/>
+  <path d="M1092 517L1280 272L1262 485L1532 412L1497 700L1700 668L1464 874Z" fill="url(#face)"/>
+</svg>
