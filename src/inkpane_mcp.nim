@@ -211,11 +211,12 @@ proc drawTool(args: JsonNode): JsonNode =
   let label = text(args, "label")
   if label.len > 0 and kind notin ["rectangle", "ellipse", "diamond"]:
     raise newException(ToolError, "label is for rectangle, ellipse and diamond; use add_text")
+  # Everything is checked before anything is drawn, so an error never leaves half a mark.
+  let (labelColor, labelSize) = (color(args, "label_color"), number(args, "size", DefaultFont))
   draw(index, kind, pts, color(args), number(args, "width", DefaultWidth) / m.scale,
     flag(args, "filled"))
   if label.len > 0:   # Inkpane centres it in the shape's box
-    draw(index, "text", points(args, m, 2, 2), color(args, "label_color"),
-      number(args, "size", DefaultFont) / m.scale, false, label)
+    draw(index, "text", points(args, m, 2, 2), labelColor, labelSize / m.scale, false, label)
   reply("Drew " & kind & (if label.len > 0: " with its label" else: "") & " on monitor " &
     $index & ".")
 

@@ -588,13 +588,13 @@ proc handleKey(app: var App, event: KeyboardEvent) =
     return
   if not (ctrl or shift) and app.drawingOn == nil:
     if event.scancode == SCANCODE_1 or event.key == SDLK_V:
+      app.startSelecting(false)
       app.setPassthrough(true)
       return
     for key in ToolOrder:
       if key.keyFor(event):
         app.tool = key.tool
-        app.selecting = false
-        app.markAllDirty()
+        app.startSelecting(false)
         return
   case event.key
   of SDLK_ESCAPE:
@@ -904,6 +904,9 @@ proc answer(app: var App, command: Command, parameters: GVariant): GVariant =
   of CmdClear:
     var aiOnly: cint
     g_variant_get(parameters, "(b)", addr aiOnly)
+    if aiOnly == 0:   # everything goes, including what the user is typing or dragging
+      app.stopTyping(keep = false)
+      app.drawingOn = nil
     for overlay in app.overlays:
       if aiOnly != 0: discard overlay.scene.clearAi() else: overlay.scene.clear()
       overlay.dirty = true
