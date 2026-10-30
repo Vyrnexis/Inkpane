@@ -19,10 +19,6 @@ through to show it working, press the key again and it is gone.
   below it, then carry on drawing: show a step, do it, show the next.
 - **Screenshots with your notes on them.** Ctrl+S, drag an area (or click for the whole
   screen): saved to Pictures/Inkpane and copied to the clipboard, ready to paste.
-- **An AI that points at your screen.** With the Claude Code plugin, Claude can circle
-  the button to click, number the steps and sketch diagrams on a whiteboard, then take a
-  screenshot to check how you got on. You do the clicking; it shows you where
-  ([see it](#teach-with-claude-code)).
 - **Recorder-friendly.** The drawing really is on screen, so OBS, Spectacle or any
   recorder captures it with no setup.
 
@@ -76,7 +72,7 @@ scripts/install-user.sh        # or: scripts/install-user.sh --autostart
 inkpane &
 ```
 
-This installs `inkpane` and `inkpane-mcp` (for AI clients). Installing matters: the
+This installs `inkpane` (and the optional `inkpane-mcp`, see below). Installing matters: the
 desktop only grants the Meta+Z shortcut to apps with an installed `.desktop` file.
 `scripts/uninstall-user.sh` removes everything again.
 
@@ -84,34 +80,13 @@ The first time you press Meta+Z, KDE asks you to confirm the shortcut. On compos
 without the shortcut portal, bind `inkpane --toggle` to a key yourself (see the
 [guide](GUIDE.md#controlling-inkpane-from-scripts)).
 
-## Teach with Claude Code
-
-<p align="center"><img src="assets/demo-ai.gif" alt="Staged demo: in Claude Code, the user asks how to install only PhotoCraft's update. Claude takes a screenshot, circles Updates in AppGlider's sidebar, the user clicks it and says done, then Claude numbers the old and new versions 1 and 2 and circles PhotoCraft's Update button" width="800"></p>
-
-Inkpane comes with a Claude Code plugin: an MCP server (`inkpane-mcp`) and a skill
-that teaches Claude to guide you step by step on your real screen. Install Inkpane
-first, then in Claude Code:
-
-```
-/plugin marketplace add Vyrnexis/Inkpane
-/plugin install inkpane@inkpane
-```
-
-Then ask things like *"How do I turn on night colour in KDE? Show me on my screen"*,
-*"Explain how git branches work, on the whiteboard"* or *"Make a tutorial for adding a
-repo to AppGlider"*. Claude asks before its first screenshot, marks one step at a time
-and waits for you to do it. By default it only draws and every click is yours; you can
-allow it to click for you in the settings. Other MCP clients can use `inkpane-mcp` directly
-(`claude mcp add inkpane -- inkpane-mcp` adds just the server). See the
-[guide](GUIDE.md#ai-claude-points-at-your-screen).
-
 ## Size and speed
 
 Measured on a release build (x86-64, KDE Plasma):
 
 | | |
 |---|---|
-| Binary | 285 KB; links only SDL3, libwayland-client and libc (`inkpane-mcp`: 255 KB, no SDL) |
+| Binary | 285 KB; links only SDL3, libwayland-client and libc |
 | Idle in the background | ~10 MB resident (~1.5 MB of it Inkpane's own), 0 % CPU |
 | Drawing | ~8 µs per pen point; one draw call per monitor per frame |
 | Undo or erase on a busy screen | under 4 ms to rebuild 30 000 points |
@@ -120,6 +95,12 @@ Lines and shapes are triangles with a one-pixel fading edge for anti-aliasing, s
 screen-sized multisample buffers are needed. Toolbar icons are drawn the same way: no
 icon files, no icon font. GLib is opened at start and SDL3_ttf only when text is first
 used.
+
+## Optional: use it with AI
+
+`inkpane-mcp` lets an AI assistant such as Claude Code use Inkpane too: point at things
+on your screen, explain on a whiteboard, or make a tutorial from your real app. It is
+separate and optional; see [AI.md](AI.md).
 
 ## License
 

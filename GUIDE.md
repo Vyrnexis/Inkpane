@@ -11,7 +11,7 @@ Everything Inkpane does, and how to get the most out of it. For installation see
 - [Click-through](#click-through)
 - [Whiteboard and blackboard](#whiteboard-and-blackboard)
 - [Screenshots](#screenshots)
-- [AI: Claude points at your screen](#ai-claude-points-at-your-screen)
+- [AI assistants (optional)](#ai-assistants-optional)
 - [The toolbar](#the-toolbar)
 - [Several monitors](#several-monitors)
 - [Settings](#settings)
@@ -209,69 +209,11 @@ app up, then click the camera.
 go of the mouse and keyboard while it waits, so you can answer. Allow it once and it is
 remembered. Change the folder in the [settings](#settings).
 
-## AI: Claude points at your screen
+## AI assistants (optional)
 
-Inkpane includes a [Claude Code](https://claude.com/claude-code) plugin. With it, Claude
-can show you how to do things on your own screen instead of describing where to click:
-it circles the right button, adds a short label or numbered steps, waits for you to do
-it, and takes a screenshot to check.
-
-**Set up** (Inkpane installed, so `inkpane-mcp` is on your PATH):
-
-```
-/plugin marketplace add Vyrnexis/Inkpane
-/plugin install inkpane@inkpane
-```
-
-**Use it** by asking for help as you would anyone looking over your shoulder:
-
-- *"How do I change the screen brightness schedule in KDE? Show me."*
-- *"Where are this app's keyboard shortcuts? Point at it."*
-- *"Explain how a web page gets from the server to my browser, on the whiteboard."*
-- *"Review this dialog: mark anything that looks wrong."*
-
-What to expect:
-
-- Claude asks before its first screenshot, and says whenever it takes one. Screenshots
-  show your screen to Claude, so it only takes them while helping you.
-- It marks **one step at a time** in a few colours: green for "do this", blue for
-  "look here", red for "not this one". Explanations stay in the chat.
-- After each step, tell it "done" (or what happened); it checks and shows the next one.
-- **Claude can only draw.** It cannot click, type or change anything; you do every step.
-- Inkpane opens in click-through for Claude, so the mouse and keyboard stay yours. Its
-  marks are kept apart from your own drawing: it removes only its own when it moves on,
-  and you can undo or erase them like anything else.
-
-### Tutorials
-
-Ask Claude to *make a tutorial* and it writes one from your real app: *"Read
-AppGlider's user guide and make a tutorial for adding a GitHub repo"*. Claude plans the
-steps and checks them with you. Then, one step at a time, it puts a numbered callout
-card next to the control and saves an image of the app's window (only the window,
-never the rest of your desktop). You click, and it checks the result. At the end you get
-a folder with `tutorial.md` and the step images. Start Spectacle or OBS first if you
-also want a video: Claude's marks are in the recording.
-
-### Letting Claude click (optional)
-
-By default Claude only points and you click. If you'd rather it stepped through a task
-by itself, for example to make a tutorial while you watch, turn it on in the
-[settings](#settings):
-
-```ini
-[ai]
-clicking = yes
-```
-
-The first time Claude clicks, your desktop asks whether to allow input control; KDE
-shows that something is controlling the mouse while it does. Claude says what it is
-about to do before each action, checks a screenshot after it, and asks you before
-anything that deletes, pays, sends or installs; it never types passwords. Inkpane must
-be in click-through for clicks to reach your apps. Set `clicking = no` (or delete the
-line) to turn it off again: it takes effect immediately.
-
-Other MCP clients can run `inkpane-mcp` as a stdio server (`claude mcp add inkpane --
-inkpane-mcp` adds only the server to Claude Code, without the skill).
+An AI assistant such as Claude Code can use Inkpane too, through the separate
+`inkpane-mcp` server: point at things on your screen, explain on a whiteboard, or make
+tutorials. Everything about it is in [AI.md](AI.md).
 
 ## The toolbar
 
@@ -341,6 +283,8 @@ folder = ""
 # click. Your desktop still asks your permission the first time.
 clicking = no
 ```
+
+The `[ai]` section only matters if you use an AI assistant; see [AI.md](AI.md).
 
 - Delete a line to get its default back; delete the file to get a fresh, fully
   commented one.
@@ -419,11 +363,6 @@ Sway, niri, COSMIC and others. GNOME and X11 sessions do not have it yet.
   permission dialog may be waiting behind another window. Allow it and try again.
 - Pasting gives nothing: install `wl-clipboard`; Inkpane then copies through `wl-copy`,
   which works more reliably than its own clipboard.
-
-### Claude says Inkpane is not running
-
-`inkpane-mcp` starts Inkpane when needed; it looks next to itself and then on your
-PATH. Check that both are installed (`which inkpane inkpane-mcp`).
 
 ### No tray icon
 
