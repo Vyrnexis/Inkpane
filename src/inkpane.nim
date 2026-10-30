@@ -33,7 +33,7 @@ const
     ("F", "Fill rectangles, diamonds, ellipses"),
     ("Shift / Ctrl while dragging", "Square, snap 15° / from the centre"),
     ("Right drag", "Erase"),
-    ("Ctrl+Z, Ctrl+Shift+Z", "Undo, redo"),
+    ("Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y", "Undo, redo"),
     ("C / Delete", "Clear (Ctrl+Z undoes it)"),
     ("Ctrl+W / Ctrl+B", "Whiteboard / blackboard"),
     ("Tab", "Hide the toolbar"),

@@ -28,11 +28,17 @@ through to show it working, press the key again and it is gone.
 | 2–0 or R D O A L P T H E, N | Pick a tool (the toolbar shows them all) |
 | Shift+1–8 | Colour |
 | `[` `]` or wheel | Thinner / thicker |
+| F | Fill rectangles, diamonds and ellipses |
+| Shift / Ctrl while dragging | Square, snap to 15° / draw from the centre |
 | Right drag | Erase |
 | Ctrl+Z | Undo |
+| Ctrl+Shift+Z or Ctrl+Y | Redo |
+| C or Delete | Clear (Ctrl+Z brings it back) |
 | 1 / V | Click-through: apps get the mouse and keys, your drawing stays |
-| F1 | Every key |
-| Esc | Close and clear |
+| Ctrl+W / Ctrl+B | Whiteboard / blackboard |
+| Tab | Hide or show the toolbar |
+| F1 | Every key, on screen |
+| Esc | Cancel the shape being drawn, or close and clear |
 
 The [user guide](GUIDE.md) explains every tool, click-through, the boards, settings,
 scripting and troubleshooting.
