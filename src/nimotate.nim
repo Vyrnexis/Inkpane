@@ -23,6 +23,16 @@ const
     FColor(r: 1.00, g: 1.00, b: 1.00, a: 1.0),  # 7 white
     FColor(r: 0.05, g: 0.05, b: 0.05, a: 1.0)   # 8 black
   ]
+  # Excalidraw's layout: a number key (by position, so any keyboard layout works) or a letter.
+  ToolKeys = [
+    (SCANCODE_2, SDLK_R, Rectangle),
+    (SCANCODE_3, SDLK_D, Diamond),
+    (SCANCODE_4, SDLK_O, Ellipse),
+    (SCANCODE_5, SDLK_A, Arrow),
+    (SCANCODE_6, SDLK_L, Line),
+    (SCANCODE_7, SDLK_P, Pen),
+    (SCANCODE_0, SDLK_E, Eraser)
+  ]
   MinWidth = 1'f32
   MaxWidth = 64'f32
   WidthStep = 2'f32
@@ -54,9 +64,10 @@ type
 
   App = object
     overlays: seq[Overlay]
+    tool: Tool
     color: FColor
     width: float32
-    drawingOn: Overlay   # overlay that owns the stroke in progress
+    drawingOn: Overlay   # overlay that owns the drag in progress (drawing or erasing)
     running: bool
     shortcuts: ShortcutSession
 
@@ -77,19 +88,41 @@ proc redraw(app: App, overlay: Overlay) =
   discard renderer.renderClear()
   overlay.mesh.update(overlay.scene)
   renderer.draw(overlay.mesh)
-  if overlay.pointerInside and not overlay.scene.active:
-    # Preview of the pen tip: an outline in the pen colour with a dark halo so it shows
-    # on both light and dark content.
-    let radius = max(app.width / 2, 2)
+  renderer.drawActiveShape(overlay.scene)
+  if overlay.pointerInside and not overlay.scene.drawing:
+    # Preview of the pen tip (or the eraser): an outline with a dark halo so it shows on
+    # both light and dark content.
+    let erasing = app.tool == Eraser
+    let radius = if erasing: EraserRadius else: max(app.width / 2, 2)
+    let color = if erasing: FColor(r: 1, g: 1, b: 1, a: 0.9) else: app.color
     renderer.drawRing(overlay.pointer, radius + 1, 3, FColor(r: 0, g: 0, b: 0, a: 0.45))
-    renderer.drawRing(overlay.pointer, radius, 1.5, app.color)
+    renderer.drawRing(overlay.pointer, radius, 1.5, color)
   discard renderer.renderPresent()
   overlay.dirty = false
+
+proc follow(app: var App, overlay: Overlay, point: FPoint) =
+  ## Moves the drag in progress to `point`; Shift and Ctrl shape rectangles, lines etc.
+  let mods = getModState()
+  if app.tool == Eraser:
+    discard overlay.scene.eraseAt(point)
+  else:
+    discard overlay.scene.moveTo(point, (mods and KMOD_SHIFT) != 0, (mods and KMOD_CTRL) != 0)
+  overlay.dirty = true
 
 proc handleKey(app: var App, event: KeyboardEvent) =
   let ctrl = (event.`mod` and KMOD_CTRL) != 0
   let shift = (event.`mod` and KMOD_SHIFT) != 0
   let target = if app.drawingOn != nil: app.drawingOn else: app.overlayFor(event.windowID)
+  if shift and event.scancode in SCANCODE_1 .. SCANCODE_8:
+    app.color = Palette[ord(event.scancode) - ord(SCANCODE_1)]
+    app.markAllDirty()
+    return
+  if not (ctrl or shift) and app.drawingOn == nil:
+    for (digit, letter, tool) in ToolKeys:
+      if event.scancode == digit or event.key == letter:
+        app.tool = tool
+        app.markAllDirty()
+        return
   case event.key
   of SDLK_ESCAPE:
     pendingCommands.add(CmdHide)
@@ -110,9 +143,6 @@ proc handleKey(app: var App, event: KeyboardEvent) =
   of SDLK_RIGHTBRACKET:
     app.width = min(MaxWidth, app.width + WidthStep)
     app.markAllDirty()
-  of SDLK_1 .. SDLK_8:
-    app.color = Palette[int(event.key - SDLK_1)]
-    app.markAllDirty()
   else:
     discard
 
@@ -120,8 +150,12 @@ proc handleEvent(app: var App, event: Event) =
   case event.`type`
   of EVENT_QUIT:
     app.running = false
-  of EVENT_KEY_DOWN:
-    app.handleKey(event.key)
+  of EVENT_KEY_DOWN, EVENT_KEY_UP:
+    if event.key.key in [SDLK_LSHIFT, SDLK_RSHIFT, SDLK_LCTRL, SDLK_RCTRL]:
+      if app.drawingOn != nil:   # pressing or releasing a modifier reshapes the drag
+        app.follow(app.drawingOn, app.drawingOn.pointer)
+    elif event.`type` == EVENT_KEY_DOWN:
+      app.handleKey(event.key)
   of EVENT_MOUSE_MOTION:
     let overlay = app.overlayFor(event.motion.windowID)
     if overlay == nil:
@@ -130,18 +164,23 @@ proc handleEvent(app: var App, event: Event) =
     overlay.pointer = point
     overlay.pointerInside = true
     if app.drawingOn == overlay:
-      discard overlay.scene.extendStroke(point)
+      app.follow(overlay, point)
     overlay.dirty = true
   of EVENT_MOUSE_BUTTON_DOWN:
     let overlay = app.overlayFor(event.button.windowID)
     if overlay != nil and event.button.button == BUTTON_LEFT:
       let point = FPoint(x: event.button.x, y: event.button.y)
-      overlay.scene.beginStroke(point, app.color, app.width)
+      if app.tool == Eraser:
+        discard overlay.scene.eraseAt(point)
+      else:
+        overlay.scene.begin(app.tool, point, app.color, app.width)
       app.drawingOn = overlay
       overlay.dirty = true
   of EVENT_MOUSE_BUTTON_UP:
     if app.drawingOn != nil and event.button.button == BUTTON_LEFT:
-      app.drawingOn.scene.endStroke(FPoint(x: event.button.x, y: event.button.y))
+      let mods = getModState()
+      app.drawingOn.scene.finish(FPoint(x: event.button.x, y: event.button.y),
+        (mods and KMOD_SHIFT) != 0, (mods and KMOD_CTRL) != 0)
       app.drawingOn.dirty = true
       app.drawingOn = nil
   of EVENT_MOUSE_WHEEL:

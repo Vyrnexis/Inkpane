@@ -5,18 +5,20 @@ import sdl3
 import scene
 
 # Thick, round-jointed lines built from triangles. SDL's renderer only draws 1px lines,
-# so every stroke becomes a mesh: a quad per segment plus a disc at every point.
+# so every item becomes a mesh: a quad per segment plus a disc at every point (which
+# also rounds the corners of shapes).
 #
-# Strokes only grow while drawing, so the mesh is kept between frames and extended with
-# the new points; it is rebuilt only when undo, redo or clear change the scene's revision.
+# Items are only appended while drawing, so the mesh is kept between frames and extended;
+# it is rebuilt only when undo, redo, the eraser or clear change the scene's revision.
+# A shape being dragged changes on every move, so it is drawn separately until finished.
 
 type
   Mesh* = object
     vertices: seq[Vertex]
     indices: seq[cint]
     revision: int   # scene revision the mesh was built from
-    stroke: int     # stroke being extended (the last one tessellated)
-    point: int      # points of that stroke already tessellated
+    item: int       # item being extended (the last one tessellated)
+    point: int      # points of that pen item already tessellated
 
 proc circleSegments(radius: float32): int =
   # Enough segments that the edge looks round at this size, without wasting vertices.
@@ -51,31 +53,51 @@ proc addSegment(mesh: var Mesh, a, b: FPoint, radius: float32, color: FColor) =
   mesh.vertices.add(Vertex(position: FPoint(x: b.x - nx, y: b.y - ny), color: color))
   mesh.indices.add([base, base + 1, base + 2, base + 1, base + 3, base + 2])
 
+proc addPath(mesh: var Mesh, path: openArray[FPoint], first: int, item: Item) =
+  ## Tessellates path[first ..], joining it to the point before `first`.
+  let radius = item.width / 2
+  for i in first ..< path.len:
+    mesh.addDisc(path[i], radius, item.color)
+    if i > 0:
+      mesh.addSegment(path[i - 1], path[i], radius, item.color)
+
+proc activeShape(scene: Scene): bool =
+  scene.drawing and scene.items[^1].kind != Pen
+
 proc update*(mesh: var Mesh, scene: Scene) =
-  ## Brings the mesh up to date with the scene, tessellating only points it has not seen.
+  ## Brings the mesh up to date with the scene, tessellating only what it has not seen.
   if mesh.revision != scene.revision:
     mesh.vertices.setLen(0)
     mesh.indices.setLen(0)
     mesh.revision = scene.revision
-    mesh.stroke = 0
+    mesh.item = 0
     mesh.point = 0
-  while mesh.stroke < scene.strokes.len:
-    template stroke: untyped = scene.strokes[mesh.stroke]
-    let radius = stroke.width / 2
-    for i in mesh.point ..< stroke.points.len:
-      mesh.addDisc(stroke.points[i], radius, stroke.color)
-      if i > 0:
-        mesh.addSegment(stroke.points[i - 1], stroke.points[i], radius, stroke.color)
-    mesh.point = stroke.points.len
-    if mesh.stroke == scene.strokes.high:
-      break   # the last stroke may still grow
-    inc mesh.stroke
+  let count = scene.items.len - ord(scene.activeShape)
+  while mesh.item < count:
+    template item: untyped = scene.items[mesh.item]
+    if item.kind == Pen:
+      mesh.addPath(item.points, mesh.point, item)
+      mesh.point = item.points.len
+      if scene.drawing and mesh.item == scene.items.high:
+        break   # this pen stroke is still growing
+    else:
+      for path in item.outline():
+        mesh.addPath(path, 0, item)
+    inc mesh.item
     mesh.point = 0
 
 proc draw*(renderer: Renderer, mesh: Mesh) =
-  ## Opaque strokes only: overlapping triangles of a translucent colour would double up.
+  ## Opaque items only: overlapping triangles of a translucent colour would double up.
   if mesh.indices.len > 0:
     discard renderer.renderGeometry(nil, mesh.vertices, mesh.indices)
+
+proc drawActiveShape*(renderer: Renderer, scene: Scene) =
+  ## The shape being dragged, which the cached mesh leaves out until it is finished.
+  if scene.activeShape:
+    var mesh: Mesh
+    for path in scene.items[^1].outline():
+      mesh.addPath(path, 0, scene.items[^1])
+    renderer.draw(mesh)
 
 proc drawRing*(renderer: Renderer, center: FPoint, radius: float32, thickness: float32, color: FColor) =
   ## Hollow circle used for the cursor preview.
