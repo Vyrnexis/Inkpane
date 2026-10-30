@@ -1,0 +1,42 @@
+# Maintainer: Vyrnexis <315210836+Vyrnexis@users.noreply.github.com>
+pkgname=nimotate-git
+pkgver=r0
+pkgrel=1
+pkgdesc="Draw on your screen through a transparent Wayland overlay (layer-shell)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/Vyrnexis/Nimotate"
+license=('MIT')
+depends=('sdl3' 'wayland' 'glib2' 'hicolor-icon-theme')
+makedepends=('git' 'nim')
+optdepends=('sdl3_ttf: text, step markers, toolbar tooltips and the F1 help'
+            'fontconfig: finds the default font for text')
+provides=('nimotate')
+conflicts=('nimotate')
+# The official SDL3 wrapper is not packaged for Arch; pinned to the commit Nimotate is built with.
+source=("Nimotate::git+$url.git"
+        "sdl3-nim::git+https://github.com/nim-lang/sdl3.git#commit=533d22196dab2ea637ea0131171ed3f8db61fe90")
+sha256sums=('SKIP'
+            'SKIP')
+
+pkgver() {
+  cd Nimotate
+  printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+}
+
+build() {
+  cd Nimotate
+  nim c -d:release --opt:size --passC:-flto --passL:-flto \
+    --noNimblePath --path:"$srcdir/sdl3-nim/src" --nimcache:"$srcdir/nimcache" \
+    --out:nimotate src/nimotate.nim
+}
+
+package() {
+  cd Nimotate
+  install -Dm755 nimotate "$pkgdir/usr/bin/nimotate"
+  install -Dm644 -t "$pkgdir/usr/share/icons/hicolor/scalable/apps/" \
+    data/icons/hicolor/scalable/apps/*.svg
+  install -dm755 "$pkgdir/usr/share/applications"
+  sed 's|@APP_BIN@|/usr/bin/nimotate|g' data/org.vyrnexis.Nimotate.desktop \
+    > "$pkgdir/usr/share/applications/org.vyrnexis.Nimotate.desktop"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
