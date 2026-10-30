@@ -1,4 +1,4 @@
-import std/math
+import std/[math, strutils]
 
 import sdl3
 
@@ -10,9 +10,22 @@ import render, scene
 # toolbar needs no font and no image files. The mesh is rebuilt only when what the
 # toolbar shows (tool, colour, width, fill, hovered button) changes.
 
+type
+  ToolKey* = object
+    tool*: Tool
+    digit*: int     # number key, by position; -1 for none
+    letter*: char
+
 const
-  ToolOrder* = [(Rectangle, 2), (Diamond, 3), (Ellipse, 4), (Arrow, 5), (Line, 6),
-                (Pen, 7), (Highlighter, 9), (Eraser, 0)]
+  # Excalidraw's layout, in toolbar order. The key handling reads it too.
+  ToolOrder* = [
+    ToolKey(tool: Rectangle, digit: 2, letter: 'R'), ToolKey(tool: Diamond, digit: 3, letter: 'D'),
+    ToolKey(tool: Ellipse, digit: 4, letter: 'O'), ToolKey(tool: Arrow, digit: 5, letter: 'A'),
+    ToolKey(tool: Line, digit: 6, letter: 'L'), ToolKey(tool: Pen, digit: 7, letter: 'P'),
+    ToolKey(tool: Text, digit: 8, letter: 'T'), ToolKey(tool: Highlighter, digit: 9, letter: 'H'),
+    ToolKey(tool: Marker, digit: -1, letter: 'N'), ToolKey(tool: Eraser, digit: 0, letter: 'E')]
+  ToolNames: array[Tool, string] = ["Pen", "Line", "Arrow", "Highlighter", "Rectangle",
+    "Diamond", "Ellipse", "Text", "Step marker", "Eraser"]
 
   ButtonSize = 36'f32
   ColorButtonWidth = 28'f32
@@ -25,6 +38,7 @@ const
   IconStroke = 1.8'f32
 
   BarColor = FColor(r: 0.22, g: 0.22, b: 0.26, a: 0.70)
+  BackdropColor = FColor(r: 0.12, g: 0.12, b: 0.15, a: 0.92)   # tooltips and help: text on it
   SeparatorColor = FColor(r: 1, g: 1, b: 1, a: 0.14)
   SelectedColor = FColor(r: 0.42, g: 0.46, b: 0.98, a: 0.55)
   HoverColor = FColor(r: 1, g: 1, b: 1, a: 0.10)
@@ -114,6 +128,21 @@ proc offset*(toolbar: Toolbar): FPoint =
   FPoint(x: toolbar.bounds.x - round((toolbar.screen.x - toolbar.bounds.w) / 2),
          y: toolbar.bounds.y - TopMargin)
 
+proc label*(toolbar: Toolbar, button: Button): string =
+  ## Tooltip: what the button does and its keys.
+  case button.kind
+  of PassButton: "Click-through   1 · V"
+  of ToolButton:
+    let key = ToolOrder[button.index]
+    ToolNames[key.tool] & "   " & (if key.digit >= 0: $key.digit & " · " else: "") & $key.letter
+  of FillButton: "Fill shapes   F"
+  of ColorButton: "Colour   Shift+" & $(button.index + 1)
+  of WidthButton: "Width " & formatFloat(toolbar.presets[button.index], precision = -1) & "   [ ]"
+
+proc tooltipAnchor*(button: Button): FPoint =
+  ## Centre of the button's bottom edge, where its tooltip hangs from.
+  FPoint(x: button.rect.x + button.rect.w / 2, y: button.rect.y + button.rect.h)
+
 proc hit*(toolbar: Toolbar, p: FPoint): int =
   ## Index of the button at `p`, or -1.
   for i, button in toolbar.buttons:
@@ -172,6 +201,16 @@ proc addIcon(mesh: var Mesh, tool: Tool, c: FPoint) =
     let bar = scaled(c, [(-0.9'f32, 0.62'f32), (0.9, 0.62)])
     mesh.addSegment(bar[0], bar[1], 3.2, FColor(r: IconColor.r, g: IconColor.g, b: IconColor.b, a: 0.4))
     mesh.lines(c, [(-0.3'f32, 0.2'f32), (0.35, -0.75), (0.85, -0.4), (0.2, 0.55), (-0.3, 0.2)])
+  of Text:
+    mesh.lines(c, [(-0.7'f32, 0.85'f32), (0.0, -0.85), (0.7, 0.85)])
+    mesh.lines(c, [(-0.42'f32, 0.25'f32), (0.42, 0.25)])
+  of Marker:
+    var ring: seq[(float32, float32)]
+    for i in 0 .. 24:
+      let angle = float32(i) / 24 * 2 * float32(PI)
+      ring.add((cos(angle) * 0.9'f32, sin(angle) * 0.9'f32))
+    mesh.lines(c, ring)
+    mesh.lines(c, [(-0.22'f32, -0.3'f32), (0.05, -0.48), (0.05, 0.48)])
   of Eraser:
     mesh.lines(c, [(-0.85'f32, 0.2'f32), (0.0, -0.65), (0.65, 0.0), (-0.2, 0.85), (-0.85, 0.2)])
     mesh.lines(c, [(-0.45'f32, -0.25'f32), (0.25, 0.45)])
@@ -198,7 +237,7 @@ proc addDigit(mesh: var Mesh, digit: int, topLeft: FPoint) =
 proc selected(toolbar: Toolbar, button: Button, state: ToolbarState): bool =
   case button.kind
   of PassButton: state.passthrough
-  of ToolButton: not state.passthrough and ToolOrder[button.index][0] == state.tool
+  of ToolButton: not state.passthrough and ToolOrder[button.index].tool == state.tool
   of FillButton: state.fill and state.tool in Fillable
   of ColorButton: button.index == state.color
   of WidthButton: abs(toolbar.presets[button.index] - state.width) < 0.01
@@ -226,9 +265,10 @@ proc build(toolbar: var Toolbar, state: ToolbarState, palette: openArray[FColor]
          (0.14, 0.12), (0.62, 0.1), (-0.45, -0.9)])
       mesh.addDigit(1, FPoint(x: c.x + 9.5, y: c.y + 3.5))
     of ToolButton:
-      let (tool, digit) = ToolOrder[button.index]
-      mesh.addIcon(tool, FPoint(x: c.x - 1.5, y: c.y - 1.5))
-      mesh.addDigit(digit, FPoint(x: c.x + 9.5, y: c.y + 3.5))  # on pixel centres: crisp at 100 %
+      let key = ToolOrder[button.index]
+      mesh.addIcon(key.tool, FPoint(x: c.x - 1.5, y: c.y - 1.5))
+      if key.digit >= 0:
+        mesh.addDigit(key.digit, FPoint(x: c.x + 9.5, y: c.y + 3.5))  # on pixel centres: crisp at 100 %
     of FillButton:
       # The current shape, solid or outlined; dimmed while the tool cannot be filled.
       let fillable = state.tool in Fillable
@@ -265,6 +305,13 @@ proc update*(toolbar: var Toolbar, screen, place: FPoint, pixelSize: float32,
     toolbar.built = false
   if not toolbar.built or state != toolbar.shown:
     toolbar.build(state, palette)
+
+proc drawBackdrop*(renderer: Renderer, rect: FRect, pixelSize: float32) =
+  ## Dark rounded panel behind tooltips and the help.
+  var mesh: Mesh
+  mesh.setPixelSize(pixelSize)
+  mesh.addFill(roundedRect(rect, min(ButtonRadius, rect.h / 2)), BackdropColor)
+  renderer.draw(mesh)
 
 proc draw*(renderer: Renderer, toolbar: Toolbar) =
   renderer.draw(toolbar.mesh)

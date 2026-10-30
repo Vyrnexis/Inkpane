@@ -1,4 +1,4 @@
-import std/[os, parsecfg, streams, strutils]
+import std/[os, osproc, parsecfg, streams, strutils]
 
 import sdl3
 
@@ -33,6 +33,11 @@ fill = no
 [toolbar]
 # Show the toolbar at start (Tab toggles it). Drag its background to move it.
 visible = yes
+
+[text]
+# Font file for text, step markers, tooltips and the F1 help. Empty: the desktop's
+# default sans-serif font. Text needs SDL3_ttf (package sdl3_ttf or libsdl3-ttf).
+font = ""
 """
 
 type
@@ -44,6 +49,7 @@ type
     tool*: Tool
     fill*: bool
     toolbar*: bool
+    font*: string          # empty: ask fontconfig
 
 proc configPath*(): string =
   getConfigDir() / "nimotate" / "nimotate.conf"
@@ -107,6 +113,10 @@ proc apply(settings: var Settings, file: Config) =
     settings.fill = parseBool(raw)
   read("toolbar", "visible"):
     settings.toolbar = parseBool(raw)
+  read("text", "font"):
+    if not fileExists(raw):
+      raise newException(ValueError, "no such file: " & raw)
+    settings.font = raw
 
 proc loadSettings*(): Settings =
   ## Defaults, then the user's file; writes the documented defaults if there is none.
@@ -123,6 +133,18 @@ proc loadSettings*(): Settings =
     result.apply(loadConfig(path))
   except IOError, OSError, ValueError:
     warn(getCurrentExceptionMsg())
+
+proc findFont*(settings: Settings): string =
+  ## The configured font, or fontconfig's default sans-serif; empty when there is none.
+  if settings.font.len > 0:
+    return settings.font
+  try:
+    result = execProcess("fc-match", args = ["-f", "%{file}", "sans-serif"],
+      options = {poUsePath}).strip
+  except OSError:
+    return ""
+  if not fileExists(result):
+    result = ""
 
 ############################
 # State

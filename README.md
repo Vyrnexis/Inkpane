@@ -4,14 +4,16 @@ Draw on your screen through a transparent Wayland overlay — for tutorials, pre
 and screen recordings. Written in Nim with SDL3 and the wlr-layer-shell protocol.
 
 > Status: **phase 1 in progress.** Runs in the background with a tray icon; toggle the
-> overlay with Meta+Z, a tray click, or `nimotate --toggle`. Pen, shapes, highlighter, eraser and
-> toolbar work; text is planned.
+> overlay with Meta+Z, a tray click, or `nimotate --toggle`. Pen, shapes, highlighter, text, step
+> markers, eraser, toolbar and boards work.
 
 ## Requirements
 
 - A Wayland desktop with layer-shell: KDE Plasma, Hyprland, Sway, niri, COSMIC
   (not GNOME or X11 sessions yet)
 - SDL3 (3.2+), libwayland-client, GLib/GIO (no GTK)
+- Optional: SDL3_ttf (`sdl3_ttf` on Arch, `libsdl3-ttf` on Debian/Ubuntu) for text, step
+  markers, toolbar tooltips and the F1 help. Without it everything else works.
 - Nim 2.2+, and `wayland-scanner` only if you regenerate the protocol code
 
 ## Build and install
@@ -45,11 +47,14 @@ installed `.desktop` file. `scripts/uninstall-user.sh` removes everything again.
 | 5 / A, 6 / L | Arrow, line (Shift snaps to 15°) |
 | 1 / V | Click-through: the drawing stays, apps get the mouse and keys; a toolbar click or Meta+Z draws again |
 | 7 / P | Pen (the default) |
+| 8 / T | Text: click, type; Enter finishes, Shift+Enter new line, Esc cancels, Ctrl+V pastes |
+| N | Step marker: each click places the next numbered circle |
 | 9 / H | Highlighter: a straight, see-through bar (Shift snaps to 15°) |
 | 0 / E | Eraser: removes every item it touches |
 | Right drag | Erase, whatever the tool |
 | F | Fill rectangles, diamonds and ellipses on/off |
 | Tab | Hide/show the toolbar |
+| F1 | Cheat sheet of all keys |
 | Ctrl+W / Ctrl+B | Whiteboard / blackboard (same key again: back to the desktop); white or black ink flips to stay visible |
 | Shift+1–8 | Colour (red, orange, yellow, green, blue, purple, white, black) |
 | `[` `]` / wheel | Thinner / thicker |

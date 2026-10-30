@@ -142,6 +142,16 @@ proc addFill*(mesh: var Mesh, path: openArray[FPoint], color: FColor) =
 
 proc addShape(mesh: var Mesh, item: Item) =
   let color = item.color.onBackground(mesh.background)
+  case item.kind
+  of Text:
+    return   # textures, drawn by the caller
+  of Marker:   # the disc; its number is text
+    let a = item.points[0]
+    let b = item.points[1]
+    mesh.addDisc(FPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2), (b.x - a.x) / 2, color)
+    return
+  else:
+    discard
   if item.kind == Highlighter:
     mesh.addSegment(item.points[0], item.points[1], item.width / 2, color)
     return

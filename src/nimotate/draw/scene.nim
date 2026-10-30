@@ -1,10 +1,11 @@
-import std/math
+import std/[math, unicode]
 
 import sdl3
 
 # Drawn items for one monitor. Items are kept as data (not pixels) so undo, the eraser
 # and every tool work on the same list. A pen item is its path; a shape is the two
-# corners of the drag, and its outline is computed from them when drawn.
+# corners of the drag, and its outline is computed from them when drawn. Text and step
+# markers are placed with a click; their points are the box they cover on screen.
 
 const
   MinPointDistance = 1.5   # logical px; denser input only adds noise and vertices
@@ -16,7 +17,7 @@ const
 
 type
   Tool* = enum
-    Pen, Line, Arrow, Highlighter, Rectangle, Diamond, Ellipse, Eraser
+    Pen, Line, Arrow, Highlighter, Rectangle, Diamond, Ellipse, Text, Marker, Eraser
 
   Item* = object
     kind*: Tool           # never Eraser
@@ -24,6 +25,7 @@ type
     width*: float32
     points*: seq[FPoint]  # pen: the path; shapes: [start, end] of the drag
     filled*: bool         # rectangle, diamond, ellipse: solid inside
+    text*: string         # text: what was typed; marker: its number
 
   Change = object
     ## One undo step. `present` says whether the item is in the scene right now;
@@ -44,6 +46,7 @@ type
 const
   Straight* = {Line, Arrow, Highlighter}
   Fillable* = {Rectangle, Diamond, Ellipse}
+  Placed* = {Text, Marker}   # put down with a click instead of dragged
 
 proc distance(a, b: FPoint): float32 =
   hypot(a.x - b.x, a.y - b.y)
@@ -85,6 +88,8 @@ proc outline*(item: Item): seq[seq[FPoint]] =
   case item.kind
   of Pen, Eraser, Line, Highlighter:
     result = @[@[a, b]]
+  of Text, Marker:   # the box, for the eraser
+    result = @[@[a, FPoint(x: b.x, y: a.y), b, FPoint(x: a.x, y: b.y), a]]
   of Arrow:
     let length = distance(a, b)
     result = @[@[a, b]]
@@ -131,6 +136,8 @@ proc moveTo*(scene: var Scene, to: FPoint, shift = false, ctrl = false): bool =
   if not scene.drawing:
     return false
   template item: untyped = scene.items[^1]
+  if item.kind in Placed:
+    return false
   if item.kind != Pen:
     item.points = @(dragCorners(item.kind, scene.anchor, to, shift, ctrl))
     return true
@@ -152,12 +159,59 @@ proc finish*(scene: var Scene, at: FPoint, shift = false, ctrl = false) =
     # Finish exactly where the pointer was released, not at the smoothed position.
     if distance(item.points[^1], at) >= 0.5:
       item.points.add(at)
-  else:
+  elif item.kind notin Placed:
     discard scene.moveTo(at, shift, ctrl)
   scene.drawing = false
-  if item.kind != Pen and distance(item.points[0], item.points[1]) < 2:
-    scene.items.setLen(scene.items.len - 1)   # a click, not a shape
+  let empty = if item.kind == Text: item.text.len == 0
+              elif item.kind == Pen: false
+              else: distance(item.points[0], item.points[1]) < 2   # a click, not a shape
+  if empty:   # never in the mesh: it was still being drawn
+    scene.items.setLen(scene.items.len - 1)
     return
+  scene.undoStack.add(Change(index: scene.items.high, present: true))
+  scene.redoStack.setLen(0)
+
+proc cancel*(scene: var Scene) =
+  ## Drops the item being drawn (Esc while typing).
+  if scene.drawing:
+    scene.items.setLen(scene.items.len - 1)
+    scene.drawing = false
+    inc scene.revision
+
+############################
+# Text and markers
+############################
+
+proc editingText*(scene: Scene): bool =
+  scene.drawing and scene.items[^1].kind == Text
+
+proc typeText*(scene: var Scene, text: string) =
+  if scene.editingText:
+    scene.items[^1].text.add(text)
+
+proc deleteLast*(scene: var Scene) =
+  ## Backspace: removes the last character, not just its last byte.
+  if scene.editingText:
+    template text: untyped = scene.items[^1].text
+    if text.len > 0:
+      text.setLen(text.len - text.lastRune(text.high)[1])
+
+proc setBox*(item: var Item, size: FPoint) =
+  ## Text knows its size only once rendered; the eraser needs it.
+  item.points = @[item.points[0],
+    FPoint(x: item.points[0].x + size.x, y: item.points[0].y + size.y)]
+
+proc markerCount*(scene: Scene): int =
+  for item in scene.items:
+    if item.kind == Marker:
+      inc result
+
+proc addMarker*(scene: var Scene, center: FPoint, radius: float32, color: FColor) =
+  ## The next step number, so undoing a marker frees its number again.
+  scene.items.add(Item(kind: Marker, color: color, width: radius * 2,
+    text: $(scene.markerCount + 1),
+    points: @[FPoint(x: center.x - radius, y: center.y - radius),
+              FPoint(x: center.x + radius, y: center.y + radius)]))
   scene.undoStack.add(Change(index: scene.items.high, present: true))
   scene.redoStack.setLen(0)
 
@@ -191,11 +245,11 @@ proc inside(path: openArray[FPoint], p: FPoint): bool =
     j = i
 
 proc touches(item: Item, p: FPoint): bool =
-  let reach = EraserRadius + item.width / 2
+  let reach = if item.kind in Placed: EraserRadius else: EraserRadius + item.width / 2
   if item.kind == Pen:
     return item.points.touches(p, reach)
   for path in item.outline():
-    if path.touches(p, reach) or (item.filled and path.inside(p)):
+    if path.touches(p, reach) or ((item.filled or item.kind in Placed) and path.inside(p)):
       return true
 
 proc flip(scene: var Scene, change: var Change) =

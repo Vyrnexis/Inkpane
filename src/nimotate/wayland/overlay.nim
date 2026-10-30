@@ -3,7 +3,7 @@ import std/math
 import sdl3
 
 import layershell
-import ../draw/[render, scene, toolbar]
+import ../draw/[render, scene, text, toolbar]
 
 # One transparent, full-screen overlay window per monitor. Each SDL window is created
 # without a shell role and then turned into a wlr-layer-shell surface on its output.
@@ -21,6 +21,7 @@ type
     scene*: Scene
     mesh*: Mesh           # triangles of `scene`, kept between frames
     toolbar*: Toolbar
+    texts*: TextCache     # rendered text, freed when no longer drawn
     pointer*: FPoint
     pointerInside*: bool
     dirty*: bool

@@ -1,10 +1,10 @@
-import std/[parseopt, posix, tables]
+import std/[math, parseopt, posix, strutils, tables]
 
 import sdl3
 
 import nimotate/config
 import nimotate/desktop/[dbus, glib, portal, tray]
-import nimotate/draw/[render, scene, toolbar]
+import nimotate/draw/[render, scene, text, toolbar]
 import nimotate/wayland/overlay
 
 # Nimotate: draw on the screen through a transparent Wayland overlay.
@@ -15,21 +15,30 @@ import nimotate/wayland/overlay
 # while apps get the mouse and keyboard, until the toolbar or the toggle brings it back.
 
 const
-  # Excalidraw's layout: a number key (by position, so any keyboard layout works) or a letter.
-  ToolKeys = [
-    (SCANCODE_2, SDLK_R, Rectangle),
-    (SCANCODE_3, SDLK_D, Diamond),
-    (SCANCODE_4, SDLK_O, Ellipse),
-    (SCANCODE_5, SDLK_A, Arrow),
-    (SCANCODE_6, SDLK_L, Line),
-    (SCANCODE_7, SDLK_P, Pen),
-    (SCANCODE_9, SDLK_H, Highlighter),
-    (SCANCODE_0, SDLK_E, Eraser)
-  ]
   MinWidth = 1'f32
   MaxWidth = 64'f32
   WidthStep = 2'f32
   ToolbarClearance = 24'f32   # a drag this close to the toolbar hides it
+  TooltipDelayMs = 600'u64
+  TooltipSize = 14'f32
+  HelpSize = 16'f32
+  TextColor = FColor(r: 0.93, g: 0.93, b: 0.95, a: 1)
+  HelpKeys = [
+    ("2–0 or R D O A L P T H E", "Tools, as in the toolbar"),
+    ("N", "Step marker: numbered circle"),
+    ("1 / V", "Click-through: apps get mouse and keys"),
+    ("Meta+Z", "Back to drawing, or close"),
+    ("Shift+1–8", "Colour"),
+    ("[ ]  or wheel", "Thinner / thicker"),
+    ("F", "Fill rectangles, diamonds, ellipses"),
+    ("Shift / Ctrl while dragging", "Square, snap 15° / from the centre"),
+    ("Right drag", "Erase"),
+    ("Ctrl+Z, Ctrl+Shift+Z", "Undo, redo"),
+    ("C / Delete", "Clear"),
+    ("Ctrl+W / Ctrl+B", "Whiteboard / blackboard"),
+    ("Tab", "Hide the toolbar"),
+    ("F1", "This help"),
+    ("Esc", "Close and clear")]
   Boards = [   # background of each board; Transparent shows the desktop
     FColor(r: 0, g: 0, b: 0, a: 0),
     FColor(r: 0.98, g: 0.98, b: 0.97, a: 1),
@@ -80,10 +89,49 @@ type
     drawingOn: Overlay   # overlay that owns the drag in progress (drawing or erasing)
     dragTool: Tool       # tool of that drag: the eraser for a right drag
     dragButton: uint8
+    typingOn: Overlay    # overlay with text being typed
+    help: bool           # F1 cheat sheet shown
+    hoverOn: Overlay     # toolbar button under the pointer, for its tooltip
+    hoverButton: int
+    hoverSince: uint64
+    tooltip: bool        # hovered long enough: show it
+    warnedNoText: bool
     running: bool
     shortcuts: ShortcutSession
 
 var pendingCommands: seq[Command]   # filled by D-Bus callbacks, drained by the main loop
+
+proc notifyError(message: string) =
+  # Desktop notification so errors are visible even though Nimotate has no window.
+  stderr.writeLine("nimotate: " & message)
+  try:
+    g_variant_unref(call("org.freedesktop.Notifications", "/org/freedesktop/Notifications",
+      "org.freedesktop.Notifications", "Notify",
+      g_variant_new("(susssasa{sv}i)", "Nimotate".cstring, 0'u32, AppId.cstring,
+        "Nimotate".cstring, message.cstring, pointer(nil), pointer(nil), -1'i32)))
+  except DBusError:
+    discard
+
+proc textSize(width: float32): float32 =
+  ## Text follows the width setting: 6 (the default) gives 27 px.
+  12 + width * 2.5
+
+proc markerRadius(width: float32): float32 =
+  10 + width * 0.9
+
+proc scale(overlay: Overlay): float32 =
+  let pixel = overlay.mesh.pixelSize
+  if pixel > 0: 1 / pixel else: 1
+
+proc textMissing(app: var App): bool =
+  ## True (and says so once) when SDL3_ttf or a font is missing.
+  if textAvailable():
+    return false
+  if not app.warnedNoText:
+    app.warnedNoText = true
+    notifyError("Text, step markers and the help need SDL3_ttf: install sdl3_ttf " &
+      "(Arch) or libsdl3-ttf (Debian, Ubuntu), then restart Nimotate.")
+  true
 
 proc overlayFor(app: App, windowId: WindowID): Overlay =
   for overlay in app.overlays:
@@ -111,6 +159,71 @@ proc toolbarInTheWay(app: App, overlay: Overlay): bool =
     w: b.w + 2 * ToolbarClearance, h: b.h + 2 * ToolbarClearance)
   app.drawingOn == overlay and overlay.pointer in around
 
+proc drawTexts(overlay: Overlay, background: FColor) =
+  ## Text items and marker numbers: textures on top of the mesh.
+  let renderer = overlay.renderer
+  for item in overlay.scene.items.mitems:
+    case item.kind
+    of Text:
+      let size = renderer.drawText(overlay.texts, item.text, item.points[0], item.width,
+        item.color.onBackground(background), true, overlay.scale)
+      item.setBox(size)   # for the eraser
+    of Marker:
+      let a = item.points[0]
+      let b = item.points[1]
+      let size = item.width * 0.6
+      let extent = measureText(item.text, size)
+      let disc = item.color.onBackground(background)
+      let light = disc.r * 0.3 + disc.g * 0.59 + disc.b * 0.11 > 0.6
+      let ink = if light: FColor(r: 0.05, g: 0.05, b: 0.05, a: 1) else: FColor(r: 1, g: 1, b: 1, a: 1)
+      discard renderer.drawText(overlay.texts, item.text,
+        FPoint(x: (a.x + b.x - extent.x) / 2, y: (a.y + b.y - extent.y) / 2), size, ink, false,
+        overlay.scale)
+    else:
+      discard
+  if overlay.scene.editingText:   # caret after the last character
+    let item = overlay.scene.items[^1]
+    let lines = item.text.split('\n')
+    let height = lineHeight(item.width)
+    let x = item.points[0].x + measureText(lines[^1], item.width).x + 1
+    let y = item.points[0].y + float32(lines.high) * height
+    var caret: Mesh
+    caret.setPixelSize(overlay.mesh.pixelSize)
+    caret.addPath([FPoint(x: x, y: y + 2), FPoint(x: x, y: y + height - 2)], 2,
+      item.color.onBackground(background))
+    renderer.draw(caret)
+
+proc drawTooltip(app: App, overlay: Overlay) =
+  let button = overlay.toolbar.buttons[app.hoverButton]
+  let label = overlay.toolbar.label(button)
+  let size = measureText(label, TooltipSize)
+  let anchor = button.tooltipAnchor
+  let x = clamp(anchor.x - size.x / 2 - 8, 4, max(overlay.width - size.x - 20, 4))
+  overlay.renderer.drawBackdrop(FRect(x: x, y: anchor.y + 8, w: size.x + 16, h: size.y + 8),
+    overlay.mesh.pixelSize)
+  discard overlay.renderer.drawText(overlay.texts, label, FPoint(x: x + 8, y: anchor.y + 12),
+    TooltipSize, TextColor, false, overlay.scale)
+
+proc drawHelp(overlay: Overlay) =
+  var keys, actions: seq[string]
+  for (key, action) in HelpKeys:
+    keys.add(key)
+    actions.add(action)
+  let keyText = keys.join("\n")
+  let actionText = actions.join("\n")
+  let keySize = measureText(keyText, HelpSize)
+  let actionSize = measureText(actionText, HelpSize)
+  let gap = 28'f32
+  let w = keySize.x + gap + actionSize.x + 56
+  let h = max(keySize.y, actionSize.y) + 48
+  let left = round((overlay.width - w) / 2)
+  let top = round((overlay.height - h) / 2)
+  overlay.renderer.drawBackdrop(FRect(x: left, y: top, w: w, h: h), overlay.mesh.pixelSize)
+  discard overlay.renderer.drawText(overlay.texts, keyText, FPoint(x: left + 28, y: top + 24),
+    HelpSize, FColor(r: 0.72, g: 0.75, b: 1, a: 1), false, overlay.scale)
+  discard overlay.renderer.drawText(overlay.texts, actionText,
+    FPoint(x: left + 28 + keySize.x + gap, y: top + 24), HelpSize, TextColor, false, overlay.scale)
+
 proc redraw(app: App, overlay: Overlay) =
   let renderer = overlay.renderer
   let background = Boards[ord(app.board)]
@@ -120,6 +233,7 @@ proc redraw(app: App, overlay: Overlay) =
   overlay.mesh.update(overlay.scene)
   renderer.draw(overlay.mesh)
   renderer.drawActiveShape(overlay.mesh, overlay.scene)
+  overlay.drawTexts(background)
   let toolbarShown = not app.hideToolbar and not app.toolbarInTheWay(overlay)
   if toolbarShown:
     overlay.toolbar.update(FPoint(x: overlay.width, y: overlay.height), app.toolbarPlace,
@@ -127,7 +241,7 @@ proc redraw(app: App, overlay: Overlay) =
     renderer.draw(overlay.toolbar)
   let overToolbar = toolbarShown and overlay.pointer in overlay.toolbar.bounds
   if overlay.pointerInside and not overlay.scene.drawing and not overToolbar and
-      not app.passthrough:
+      not app.passthrough and app.tool notin Placed:
     # Preview of the pen tip (or the eraser): an outline with a dark halo so it shows on
     # both light and dark content.
     let erasing = app.tool == Eraser
@@ -136,6 +250,11 @@ proc redraw(app: App, overlay: Overlay) =
                 else: toolColor(app.tool, app.color).onBackground(background)
     renderer.drawRing(overlay.pointer, radius + 1, 3, FColor(r: 0, g: 0, b: 0, a: 0.45))
     renderer.drawRing(overlay.pointer, radius, 1.5, color)
+  if toolbarShown and app.tooltip and app.hoverOn == overlay:
+    app.drawTooltip(overlay)
+  if app.help:
+    overlay.drawHelp()
+  overlay.texts.endFrame()
   discard renderer.renderPresent()
   overlay.dirty = false
 
@@ -155,6 +274,50 @@ proc setPassthrough(app: var App, on: bool) =
     overlay.setPassthrough(on, clickable)
   app.markAllDirty()
 
+proc startTyping(app: var App, overlay: Overlay, at: FPoint) =
+  ## Text starts where clicked, the first line centred on the pointer.
+  let size = textSize(app.width)
+  overlay.scene.begin(Text, FPoint(x: at.x, y: at.y - lineHeight(size) / 2), app.color, size)
+  discard startTextInput(overlay.window)
+  app.typingOn = overlay
+  overlay.dirty = true
+
+proc stopTyping(app: var App, keep: bool) =
+  ## Commits the text (empty text is dropped) or, without `keep`, throws it away.
+  let overlay = app.typingOn
+  if overlay == nil:
+    return
+  if keep: overlay.scene.finish(FPoint()) else: overlay.scene.cancel()
+  discard stopTextInput(overlay.window)
+  app.typingOn = nil
+  overlay.dirty = true
+
+proc typingKey(app: var App, event: KeyboardEvent) =
+  ## While typing, keys edit the text instead of running shortcuts.
+  let scene = addr app.typingOn.scene
+  let ctrl = (event.`mod` and KMOD_CTRL) != 0
+  case event.key
+  of SDLK_ESCAPE:
+    app.stopTyping(keep = false)
+    return
+  of SDLK_RETURN, SDLK_KP_ENTER:
+    if (event.`mod` and KMOD_SHIFT) != 0:
+      scene[].typeText("\n")
+    else:
+      app.stopTyping(keep = true)
+      return
+  of SDLK_BACKSPACE:
+    scene[].deleteLast()
+  of SDLK_V:
+    if ctrl:
+      let clip = getClipboardText()
+      if clip != nil:
+        scene[].typeText(($clip).replace("\r", ""))
+        sdlFree(clip)
+  else:
+    discard
+  app.typingOn.dirty = true
+
 proc press(app: var App, button: Button) =
   if button.kind == PassButton:
     app.setPassthrough(not app.passthrough)
@@ -163,13 +326,24 @@ proc press(app: var App, button: Button) =
     app.setPassthrough(false)
   case button.kind
   of PassButton: discard
-  of ToolButton: app.tool = ToolOrder[button.index][0]
+  of ToolButton: app.tool = ToolOrder[button.index].tool
   of FillButton: app.fill = not app.fill
   of ColorButton: app.color = app.settings.palette[button.index]
   of WidthButton: app.width = app.settings.presets[button.index]
   app.markAllDirty()
 
+proc keyFor(key: ToolKey, event: KeyboardEvent): bool =
+  ## Number keys by position, so any keyboard layout works; letters by what they type.
+  let digit = case key.digit
+    of -1: -1
+    of 0: ord(SCANCODE_0)
+    else: ord(SCANCODE_1) + key.digit - 1
+  ord(event.scancode) == digit or event.key == Keycode(ord(key.letter.toLowerAscii))
+
 proc handleKey(app: var App, event: KeyboardEvent) =
+  if app.typingOn != nil:
+    app.typingKey(event)
+    return
   let ctrl = (event.`mod` and KMOD_CTRL) != 0
   let shift = (event.`mod` and KMOD_SHIFT) != 0
   let target = if app.drawingOn != nil: app.drawingOn else: app.overlayFor(event.windowID)
@@ -183,14 +357,22 @@ proc handleKey(app: var App, event: KeyboardEvent) =
     if event.scancode == SCANCODE_1 or event.key == SDLK_V:
       app.setPassthrough(true)
       return
-    for (digit, letter, tool) in ToolKeys:
-      if event.scancode == digit or event.key == letter:
-        app.tool = tool
+    for key in ToolOrder:
+      if key.keyFor(event):
+        app.tool = key.tool
         app.markAllDirty()
         return
   case event.key
   of SDLK_ESCAPE:
-    pendingCommands.add(CmdHide)
+    if app.help:
+      app.help = false
+      app.markAllDirty()
+    else:
+      pendingCommands.add(CmdHide)
+  of SDLK_F1:
+    if not app.textMissing:
+      app.help = not app.help
+      app.markAllDirty()
   of SDLK_F:
     app.fill = not app.fill
   of SDLK_TAB:
@@ -230,6 +412,10 @@ proc handleEvent(app: var App, event: Event) =
         app.follow(app.drawingOn, app.drawingOn.pointer)
     elif event.`type` == EVENT_KEY_DOWN:
       app.handleKey(event.key)
+  of EVENT_TEXT_INPUT:
+    if app.typingOn != nil:
+      app.typingOn.scene.typeText($event.text.text)
+      app.typingOn.dirty = true
   of EVENT_MOUSE_MOTION:
     let overlay = app.overlayFor(event.motion.windowID)
     if overlay == nil:
@@ -248,6 +434,7 @@ proc handleEvent(app: var App, event: Event) =
     let button = event.button.button
     if overlay != nil and app.drawingOn == nil and int(button) in [BUTTON_LEFT, BUTTON_RIGHT]:
       let point = FPoint(x: event.button.x, y: event.button.y)
+      app.stopTyping(keep = true)   # a click anywhere finishes the text being typed
       let pressed = app.toolbarHit(overlay)
       if pressed >= 0:
         if int(button) == BUTTON_LEFT:
@@ -259,6 +446,14 @@ proc handleEvent(app: var App, event: Event) =
           app.grab = FPoint(x: point.x - app.toolbarPlace.x, y: point.y - app.toolbarPlace.y)
         return
       app.dragTool = if int(button) == BUTTON_RIGHT: Eraser else: app.tool
+      if app.dragTool in Placed:
+        if not app.textMissing:
+          if app.dragTool == Text:
+            app.startTyping(overlay, point)
+          else:
+            overlay.scene.addMarker(point, markerRadius(app.width), app.color)
+            overlay.dirty = true
+        return
       app.dragButton = button
       if app.dragTool == Eraser:
         discard overlay.scene.eraseAt(point)
@@ -303,17 +498,6 @@ proc handleEvent(app: var App, event: Event) =
 # Draw Mode
 ############################
 
-proc notifyError(message: string) =
-  # Desktop notification so errors are visible even though Nimotate has no window.
-  stderr.writeLine("nimotate: " & message)
-  try:
-    g_variant_unref(call("org.freedesktop.Notifications", "/org/freedesktop/Notifications",
-      "org.freedesktop.Notifications", "Notify",
-      g_variant_new("(susssasa{sv}i)", "Nimotate".cstring, 0'u32, AppId.cstring,
-        "Nimotate".cstring, message.cstring, pointer(nil), pointer(nil), -1'i32)))
-  except DBusError:
-    discard
-
 proc drawing(app: App): bool =
   app.overlays.len > 0
 
@@ -333,6 +517,10 @@ proc hideOverlays(app: var App) =
     overlay.close()
   app.overlays.setLen(0)
   app.drawingOn = nil
+  app.typingOn = nil
+  app.hoverOn = nil
+  app.tooltip = false
+  app.help = false
   app.passthrough = false
   setTrayDrawing(false)
 
@@ -373,6 +561,26 @@ proc bindToggleShortcut(app: var App) =
     setTrayShortcutHint("")
     notifyError("Global shortcut unavailable (" & getCurrentExceptionMsg() &
       "). Use the tray icon or `nimotate --toggle`.")
+
+proc updateTooltip(app: var App) =
+  ## A tooltip appears once the pointer rests on a toolbar button for a moment.
+  var on: Overlay = nil
+  var button = -1
+  for overlay in app.overlays:
+    let hit = app.toolbarHit(overlay)
+    if hit >= 0:
+      on = overlay
+      button = hit
+  if on != app.hoverOn or button != app.hoverButton:
+    if app.tooltip and app.hoverOn != nil:
+      app.hoverOn.dirty = true   # take the old tooltip away
+    app.hoverOn = on
+    app.hoverButton = button
+    app.hoverSince = getTicks()
+    app.tooltip = false
+  elif on != nil and not app.tooltip and getTicks() - app.hoverSince >= TooltipDelayMs:
+    app.tooltip = textAvailable()
+    on.dirty = app.tooltip
 
 proc collectCommands(app: var App) =
   dbus.pump()
@@ -455,6 +663,7 @@ proc run(): int =
     return 1
 
   let settings = loadSettings()
+  setFontLookup(proc (): string = settings.findFont())
   var app = App(settings: settings, color: settings.palette[settings.color], width: settings.width,
     tool: settings.tool, fill: settings.fill, hideToolbar: not settings.toolbar,
     toolbarPlace: loadToolbarPlace(), running: true)
@@ -482,6 +691,7 @@ proc run(): int =
     while pollEvent(event):
       app.handleEvent(event)
     app.collectCommands()
+    app.updateTooltip()
     for overlay in app.overlays:
       if overlay.closedByCompositor():
         pendingCommands.add(CmdHide)
