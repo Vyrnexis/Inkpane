@@ -21,7 +21,8 @@ through to show it working, press the key again and it is gone.
   screen): saved to Pictures/Inkpane and copied to the clipboard, ready to paste.
 - **An AI that points at your screen.** With the Claude Code plugin, Claude can circle
   the button to click, number the steps and sketch diagrams on a whiteboard, then take a
-  screenshot to check how you got on. You do the clicking; it shows you where.
+  screenshot to check how you got on. You do the clicking; it shows you where
+  ([see it](#teach-with-claude-code)).
 - **Recorder-friendly.** The drawing really is on screen, so OBS, Spectacle or any
   recorder captures it with no setup.
 
@@ -84,6 +85,8 @@ without the shortcut portal, bind `inkpane --toggle` to a key yourself (see the
 [guide](GUIDE.md#controlling-inkpane-from-scripts)).
 
 ## Teach with Claude Code
+
+<p align="center"><img src="assets/demo-ai.gif" alt="Staged demo: in Claude Code, the user asks how to install only PhotoCraft's update. Claude takes a screenshot, circles Updates in AppGlider's sidebar, the user clicks it and says done, then Claude numbers the old and new versions 1 and 2 and circles PhotoCraft's Update button" width="800"></p>
 
 Inkpane comes with a Claude Code plugin: an MCP server (`inkpane-mcp`) and a skill
 that teaches Claude to guide you step by step on your real screen. Install Inkpane
