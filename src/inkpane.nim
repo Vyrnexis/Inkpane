@@ -147,8 +147,8 @@ type
     hoverOn: Overlay     # toolbar button under the pointer, for its tooltip
     hoverButton: int
     hoverSince: uint64
-    moveCursorShown: bool
     tooltip: bool        # hovered long enough: show it
+    moveCursorShown: bool   # over the toolbar's grip, or dragging the toolbar
     selecting: bool      # Ctrl+S: the next drag or click picks what to capture
     selectOn: Overlay    # overlay of that drag
     selectFrom, selectTo: FPoint
@@ -163,6 +163,7 @@ type
 var
   pendingCommands: seq[Command]   # from the tray, the shortcut, keys and signals
   pendingCalls: seq[Call]         # from our D-Bus service
+  moveCursor: Cursor              # made the first time the pointer is on the grip
 
 proc notify(message: string) =
   # Desktop notification: Inkpane has no window to say things in.
@@ -232,10 +233,10 @@ proc drawTexts(overlay: Overlay, background: FColor) =
   for item in overlay.scene.items.mitems:
     case item.kind
     of Text:
+      # A halo keeps text readable over the desktop; a board needs none.
       let size = if item.text.len == 0: FPoint(x: 0, y: lineHeight(item.width))   # just typing
                  else: renderer.drawText(overlay.texts, item.text, item.points[0], item.width,
                    item.shown(background), background.a < 1, overlay.scale)
-                   # the halo keeps text readable over the desktop; a board needs none
       item.setBox(size)   # for the eraser and the typing hint
     of Marker:
       let a = item.points[0]
@@ -262,33 +263,41 @@ proc drawTexts(overlay: Overlay, background: FColor) =
       item.shown(background))
     renderer.draw(caret)
 
+proc drawChip(overlay: Overlay, text: string, at: FPoint) =
+  ## A line of text on a dark panel (tooltips and hints); `at` is the text's top-left.
+  let size = measureText(text, TooltipSize)
+  overlay.renderer.drawBackdrop(FRect(x: at.x - 8, y: at.y - 4, w: size.x + 16, h: size.y + 8),
+    overlay.mesh.pixelSize)
+  discard overlay.renderer.drawText(overlay.texts, text, at, TooltipSize, TextColor, false,
+    overlay.scale)
+
+proc drawBottomChip(overlay: Overlay, text: string, margin: float32) =
+  ## A hint centred near the bottom of the screen.
+  let size = measureText(text, TooltipSize)
+  overlay.drawChip(text, FPoint(x: round((overlay.width - size.x) / 2),
+    y: overlay.height - size.y - margin))
+
 proc drawTooltip(app: App, overlay: Overlay) =
   let button = overlay.toolbar.buttons[app.hoverButton]
   let label = overlay.toolbar.label(button)
   let size = measureText(label, TooltipSize)
   let anchor = button.tooltipAnchor
-  let x = clamp(anchor.x - size.x / 2 - 8, 4, max(overlay.width - size.x - 20, 4))
-  var y = anchor.y + 8
-  if y + size.y + 8 > overlay.height:   # toolbar dragged to the bottom: above it instead
-    y = overlay.toolbar.bounds.y - size.y - 16
-  overlay.renderer.drawBackdrop(FRect(x: x, y: y, w: size.x + 16, h: size.y + 8),
-    overlay.mesh.pixelSize)
-  discard overlay.renderer.drawText(overlay.texts, label, FPoint(x: x + 8, y: y + 4),
-    TooltipSize, TextColor, false, overlay.scale)
+  let x = clamp(anchor.x - size.x / 2, 12, max(overlay.width - size.x - 12, 12))
+  var y = anchor.y + 12
+  if y + size.y + 4 > overlay.height:   # toolbar dragged to the bottom: above it instead
+    y = overlay.toolbar.bounds.y - size.y - 12
+  overlay.drawChip(label, FPoint(x: x, y: y))
 
 proc drawTypingHint(overlay: Overlay) =
   ## Under the text being typed: how to finish it.
   const Hint = "Enter  done     Shift+Enter  new line     Esc  cancel"
   let item = overlay.scene.items[^1]
   let size = measureText(Hint, TooltipSize)
-  let x = clamp(item.points[0].x, 4, max(overlay.width - size.x - 20, 4))
-  var y = item.points[1].y + 8
-  if y + size.y + 8 > overlay.height:   # no room below: above the text instead
-    y = item.points[0].y - size.y - 16
-  overlay.renderer.drawBackdrop(FRect(x: x, y: y, w: size.x + 16, h: size.y + 8),
-    overlay.mesh.pixelSize)
-  discard overlay.renderer.drawText(overlay.texts, Hint, FPoint(x: x + 8, y: y + 4),
-    TooltipSize, TextColor, false, overlay.scale)
+  let x = clamp(item.points[0].x + 8, 12, max(overlay.width - size.x - 12, 12))
+  var y = item.points[1].y + 12
+  if y + size.y + 4 > overlay.height:   # no room below: above the text instead
+    y = item.points[0].y - size.y - 12
+  overlay.drawChip(Hint, FPoint(x: x, y: y))
 
 proc drawHelp(overlay: Overlay) =
   var keys, actions: seq[string]
@@ -338,14 +347,7 @@ proc drawSelection(app: App, overlay: Overlay) =
     mesh.addFill(rectPath(FRect(w: w, h: h)), Dim)
   overlay.renderer.draw(mesh)
   if textAvailable() and app.selectOn != overlay:
-    const Hint = "Drag an area     Click  whole screen     Esc  cancel"
-    let size = measureText(Hint, TooltipSize)
-    let x = round((w - size.x) / 2)
-    let y = h - size.y - 72
-    overlay.renderer.drawBackdrop(FRect(x: x - 8, y: y - 4, w: size.x + 16, h: size.y + 8),
-      overlay.mesh.pixelSize)
-    discard overlay.renderer.drawText(overlay.texts, Hint, FPoint(x: x, y: y), TooltipSize,
-      TextColor, false, overlay.scale)
+    overlay.drawBottomChip("Drag an area     Click  whole screen     Esc  cancel", 72)
 
 proc render(app: App, overlay: Overlay) =
   ## One frame, not yet presented.
@@ -368,13 +370,7 @@ proc render(app: App, overlay: Overlay) =
     app.drawSelection(overlay)
   if app.boardHint and not app.capturing and textAvailable():
     let key = if app.board == Whiteboard: "Ctrl+W" else: "Ctrl+B"
-    let hint = key & "  back to your desktop     Esc  close"
-    let size = measureText(hint, TooltipSize)
-    let at = FPoint(x: round((overlay.width - size.x) / 2), y: overlay.height - size.y - 28)
-    overlay.renderer.drawBackdrop(FRect(x: at.x - 8, y: at.y - 4, w: size.x + 16, h: size.y + 8),
-      overlay.mesh.pixelSize)
-    discard overlay.renderer.drawText(overlay.texts, hint, at, TooltipSize, TextColor, false,
-      overlay.scale)
+    overlay.drawBottomChip(key & "  back to your desktop     Esc  close", 28)
   let overToolbar = toolbarShown and overlay.pointer in overlay.toolbar.bounds
   if overlay.pointerInside and not overlay.scene.drawing and not overToolbar and
       not (app.passthrough or app.capturing):
@@ -523,7 +519,7 @@ proc grabDesktop(app: var App): string =
     app.capturing = false
     app.setPassthrough(app.passthrough)   # input back, and the UI redrawn
 
-proc capture(app: var App, monitor: int, area: Rect, width, height: int, path: string) =
+proc saveCapture(app: var App, monitor: int, area: Rect, width, height: int, path: string) =
   ## Saves `area` of `monitor` (zero size: all of it) to `path`, scaled to width × height.
   let shot = app.grabDesktop()
   let image = crop(shot, monitors(), monitor, area, width, height)
@@ -541,7 +537,7 @@ proc screenshot(app: var App, overlay: Overlay, area: Rect) =
   ## Ctrl+S: saves into the screenshot folder and puts it on the clipboard.
   let path = newScreenshotPath(screenshotFolder(app.settings.screenshotFolder))
   try:
-    app.capture(app.overlays.find(overlay), area, 0, 0, path)
+    app.saveCapture(app.overlays.find(overlay), area, 0, 0, path)
   except CatchableError:
     notifyError("Screenshot failed: " & getCurrentExceptionMsg())
     return
@@ -567,20 +563,23 @@ proc finishSelecting(app: var App) =
   app.screenshot(overlay, area)
 
 proc press(app: var App, button: Button) =
-  if button.kind == PassButton:
+  ## A toolbar button. Any but click-through itself goes back to drawing, as in Excalidraw.
+  case button.kind
+  of GripButton:
+    return   # dragged, not pressed
+  of PassButton:
     app.startSelecting(false)
     app.setPassthrough(not app.passthrough)
     return
-  if app.passthrough:   # picking anything else goes back to drawing, as in Excalidraw
-    app.setPassthrough(false)
-  if button.kind == CaptureButton:
-    app.startSelecting(not app.selecting)
-    return
-  if button.kind == ToolButton:
-    app.startSelecting(false)
+  else:
+    if app.passthrough:
+      app.setPassthrough(false)
   case button.kind
-  of GripButton, PassButton, CaptureButton: discard
-  of ToolButton: app.tool = ToolOrder[button.index].tool
+  of GripButton, PassButton: discard
+  of CaptureButton: app.startSelecting(not app.selecting)
+  of ToolButton:
+    app.tool = ToolOrder[button.index].tool
+    app.startSelecting(false)
   of FillButton: app.fill = not app.fill
   of ColorButton: app.color = app.settings.palette[button.index]
   of WidthButton: app.width = app.settings.presets[button.index]
@@ -857,23 +856,16 @@ proc aiDraw(app: var App, parameters: GVariant) =
     path.add(FPoint(x: float32(x), y: float32(y)))
   g_variant_unref(points)
 
-  var tool = Pen
-  var found = false
-  for t in Tool:
-    if t != Eraser and cmpIgnoreCase($t, $kind) == 0:
-      tool = t
-      found = true
-  if not found:
-    raise newException(ValueError, "Unknown kind: " & $kind)
-  let needed = if tool in Placed: 1 else: 2
-  if path.len < needed or (tool notin Placed + {Pen} and path.len != 2) or
-      (tool == Marker and path.len != 1) or (tool == Text and path.len > 2):
-    raise newException(ValueError, $kind & " needs " &
-      (case tool
-        of Marker: "1 point"
-        of Text: "1 point (top-left), or 2 to centre it in their box"
-        of Pen: "2 or more points"
-        else: "2 points"))
+  let tool = toolNamed($kind)
+  if tool == Eraser:
+    raise newException(ValueError, "The AI can't erase; use Clear or UndoAi.")
+  let (fits, needs) = case tool
+    of Marker: (path.len == 1, "1 point")
+    of Text: (path.len in 1 .. 2, "1 point (top-left), or 2 to centre it in their box")
+    of Pen: (path.len >= 2, "2 or more points")
+    else: (path.len == 2, "2 points")
+  if not fits:
+    raise newException(ValueError, $kind & " needs " & needs)
   if tool == Text and ($text).len == 0:
     raise newException(ValueError, "Text needs some text.")
   let ink = if ($color).len == 0: app.settings.palette[0] else: parseColor($color)
@@ -975,7 +967,7 @@ proc answer(app: var App, command: Command, parameters: GVariant): GVariant =
     if w < 0 or h < 0:
       raise newException(ValueError, "Bad area " & $w & " × " & $h)
     let path = runtimeDir() / "capture.png"
-    app.capture(monitor, Rect(x: x, y: y, w: w, h: h), width, height, path)
+    app.saveCapture(monitor, Rect(x: x, y: y, w: w, h: h), width, height, path)
     result = g_variant_new("(s)", path.cstring)
 
 ############################
@@ -983,7 +975,8 @@ proc answer(app: var App, command: Command, parameters: GVariant): GVariant =
 ############################
 
 proc serviceMethod(methodName: string, parameters: GVariant, invocation: pointer) =
-  # Answered from the main loop (answerCalls), which may take a while for Capture.
+  # Queued and answered from the main loop (collectCommands), which for Capture can take
+  # a while.
   for command in CmdToggle .. CmdCapture:
     if methodName == $command:
       pendingCalls.add(Call(command: command, parameters: g_variant_ref(parameters),
@@ -1006,8 +999,6 @@ proc bindToggleShortcut(app: var App) =
     setTrayShortcutHint("")
     notifyError("Global shortcut unavailable (" & getCurrentExceptionMsg() &
       "). Use the tray icon or `inkpane --toggle`.")
-
-var moveCursor: Cursor
 
 proc updateCursor(app: var App) =
   ## A move cursor over the toolbar's grip and while the toolbar is dragged.

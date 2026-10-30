@@ -17,12 +17,15 @@ const
   DefaultFont = 16.0
   DefaultRadius = 11.0   # step markers
   DefaultWidth = 3.0
+  CharWidth = 0.52      # average character width in em, to estimate how wide text is
+  LineSpacing = 1.4     # line height in em
+  Accent = "#2563eb"    # callouts
   Versions = ["2024-11-05", "2025-03-26", "2025-06-18"]
   Colors = {
     "red": "#ed3333", "orange": "#fa8c21", "yellow": "#fad926", "green": "#33c759",
     "blue": "#3385fa", "purple": "#9e59e6", "white": "#ffffff", "black": "#0d0d0d",
   }
-  Instructions = """Inkpane draws on the user's real screen. You can only draw; the user does all the clicking.
+  Instructions = """Inkpane draws on the user's real screen. You point; the user clicks (unless they turned on AI clicking, which adds click and typing tools).
 Ask the user before your first screenshot in a session, and say when you take one.
 Teach one step at a time: take a screenshot, mark one thing (`circle` it, or an arrow, plus a 2-4 word label, or a step marker), explain why in chat, wait for the user, screenshot again to check, then `clear` before the next step.
 Keep at most about three marks on screen.
@@ -84,19 +87,14 @@ proc monitors(): seq[Monitor] =
   let list = g_variant_get_child_value(reply, 0)   # reply is (a(siiii))
   for i in 0 ..< int(g_variant_n_children(list)):
     let item = g_variant_get_child_value(list, csize_t(i))
-    let name = g_variant_get_child_value(item, 0)
-    let x = g_variant_get_child_value(item, 1)
-    let y = g_variant_get_child_value(item, 2)
-    let w = g_variant_get_child_value(item, 3)
-    let h = g_variant_get_child_value(item, 4)
-    var m = Monitor(name: $g_variant_get_string(name, nil),
-      x: int(g_variant_get_int32(x)), y: int(g_variant_get_int32(y)),
-      w: int(g_variant_get_int32(w)), h: int(g_variant_get_int32(h)))
+    var name: cstring
+    var x, y, w, h: int32
+    g_variant_get(item, "(&siiii)", addr name, addr x, addr y, addr w, addr h)
+    var m = Monitor(name: $name, x: int(x), y: int(y), w: int(w), h: int(h))
+    g_variant_unref(item)
     m.scale = min(1.0, min(MaxSide / float(max(m.w, m.h)),
       sqrt(MaxPixels / float(m.w * m.h))))
     result.add m
-    for part in [name, x, y, w, h, item]:
-      g_variant_unref(part)
   g_variant_unref(list)
   g_variant_unref(reply)
 
@@ -150,20 +148,47 @@ proc color(args: JsonNode, key = "color"): string =
   raise newException(ToolError, "unknown color '" & value &
     "'; use red, orange, yellow, green, blue, purple, white, black or #rrggbb")
 
-proc points(args: JsonNode, m: Monitor, minCount, maxCount: int): GVariant =
-  ## Model-space [[x, y], ...] to an a(dd) of logical px.
+type Point = (float, float)   # screenshot px
+
+proc points(args: JsonNode, minCount, maxCount: int): seq[Point] =
+  ## The `points` argument, checked: [[x, y], ...].
   let list = if args.hasKey("points"): args["points"] else: newJNull()
   if list.kind != JArray or list.len < minCount or list.len > maxCount:
     raise newException(ToolError, "points must be an array of " &
       (if minCount == maxCount: $minCount else: "at least " & $minCount) & " [x, y] pairs")
-  let builder = newBuilder("a(dd)")
   for p in list:
     if p.kind != JArray or p.len != 2 or p[0].kind notin {JInt, JFloat} or
         p[1].kind notin {JInt, JFloat}:
       raise newException(ToolError, "each point must be [x, y] with numbers")
-    g_variant_builder_add(builder, "(dd)", cdouble(p[0].getFloat / m.scale),
-      cdouble(p[1].getFloat / m.scale))
+    result.add((p[0].getFloat, p[1].getFloat))
+
+proc onScreen(m: Monitor, pts: openArray[Point]): GVariant =
+  ## Screenshot px to an a(dd) of the monitor's logical px, for Draw.
+  let builder = newBuilder("a(dd)")
+  for (x, y) in pts:
+    g_variant_builder_add(builder, "(dd)", cdouble(x / m.scale), cdouble(y / m.scale))
   builder.finish
+
+proc box(args: JsonNode, key: string): (float, float, float, float) =
+  ## [left, top, right, bottom], in either order.
+  let b = if args.hasKey(key): args[key] else: newJNull()
+  if b.kind != JArray or b.len != 4 or b.anyIt(it.kind notin {JInt, JFloat}):
+    raise newException(ToolError, key & " must be [left, top, right, bottom]")
+  (min(b[0].getFloat, b[2].getFloat), min(b[1].getFloat, b[3].getFloat),
+   max(b[0].getFloat, b[2].getFloat), max(b[1].getFloat, b[3].getFloat))
+
+proc wrapText(s: string, size, maxWidth: float): seq[string] =
+  ## Lines no wider than maxWidth, by the estimated character width.
+  let columns = max(int(maxWidth / (size * CharWidth)), 8)
+  for paragraph in s.split('\n'):
+    var line = ""
+    for word in strutils.splitWhitespace(paragraph):
+      if line.len > 0 and line.runeLen + 1 + word.runeLen > columns:
+        result.add(line)
+        line = word
+      else:
+        line = if line.len == 0: word else: line & " " & word
+    result.add(line)
 
 proc plain(s: string): string =
   ## Inkpane draws text in one font, and common ones (Noto Sans) have no arrows or ticks.
@@ -171,10 +196,21 @@ proc plain(s: string): string =
   s.multiReplace(("→", "->"), ("⇒", "=>"), ("←", "<-"), ("⇐", "<="), ("↔", "<->"),
     ("✓", "OK"), ("✔", "OK"), ("✗", "X"), ("✘", "X"), ("**", ""), ("`", ""))
 
-proc draw(monitor: int, kind: string, pts: GVariant, color: string, width: float,
-    filled: bool, label = "") =
+proc draw(monitor: int, m: Monitor, kind: string, pts: openArray[Point], color: string,
+    size: float, filled = false, label = "") =
+  ## Inkpane's Draw; `size` (line width, font size or marker radius) in screenshot px.
   g_variant_unref(call("Draw", g_variant_new("(is@a(dd)sdbs)", cint(monitor), kind.cstring,
-    pts, color.cstring, cdouble(width), cint(filled), plain(label).cstring)))
+    m.onScreen(pts), color.cstring, cdouble(size / m.scale), cint(filled), plain(label).cstring)))
+
+proc capture(monitor: int, area: (int, int, int, int), width, height: int): string =
+  ## Inkpane's Capture: the PNG it wrote. area in logical px (zero size: the whole monitor),
+  ## width × height the image size (zero: real pixels).
+  let captured = call("Capture", g_variant_new("(iiiiiii)", cint(monitor), cint(area[0]),
+    cint(area[1]), cint(area[2]), cint(area[3]), cint(width), cint(height)), CaptureTimeoutMs)
+  var path: cstring
+  g_variant_get(captured, "(&s)", addr path)
+  result = $path
+  g_variant_unref(captured)
 
 ############################
 # Tools
@@ -196,12 +232,7 @@ proc screenInfo(args: JsonNode): JsonNode =
 proc screenshot(args: JsonNode): JsonNode =
   let (index, m) = pick(args)
   let (w, h) = m.modelSize
-  let r = call("Capture", g_variant_new("(iiiiiii)", cint(index), cint(0), cint(0), cint(0), cint(0),
-    cint(w), cint(h)), CaptureTimeoutMs)
-  var path: cstring
-  g_variant_get(r, "(&s)", addr path)
-  let file = $path
-  g_variant_unref(r)
+  let file = capture(index, (0, 0, 0, 0), w, h)
   var png: string
   try:
     png = readFile(file)
@@ -211,14 +242,6 @@ proc screenshot(args: JsonNode): JsonNode =
     {"type": "image", "data": encode(png), "mimeType": "image/png"},
     {"type": "text", "text": "Monitor " & $index & " (" & m.name & "), " & $w & "x" & $h &
       " px. Draw with these coordinates. Your own marks are visible in it; Inkpane's toolbar is hidden."}]}
-
-proc box(args: JsonNode, key: string): (float, float, float, float) =
-  ## [left, top, right, bottom], in either order.
-  let b = if args.hasKey(key): args[key] else: newJNull()
-  if b.kind != JArray or b.len != 4 or b.anyIt(it.kind notin {JInt, JFloat}):
-    raise newException(ToolError, key & " must be [left, top, right, bottom]")
-  (min(b[0].getFloat, b[2].getFloat), min(b[1].getFloat, b[3].getFloat),
-   max(b[0].getFloat, b[2].getFloat), max(b[1].getFloat, b[3].getFloat))
 
 proc saveScreenshot(args: JsonNode): JsonNode =
   ## A tutorial image: the area at the screen's real resolution, with the marks on it.
@@ -232,12 +255,7 @@ proc saveScreenshot(args: JsonNode): JsonNode =
     area = (int(l / m.scale), int(t / m.scale), int((r - l) / m.scale), int((b - t) / m.scale))
     if area[2] < 8 or area[3] < 8:
       raise newException(ToolError, "region is too small")
-  let captured = call("Capture", g_variant_new("(iiiiiii)", cint(index), cint(area[0]),
-    cint(area[1]), cint(area[2]), cint(area[3]), cint(0), cint(0)), CaptureTimeoutMs)
-  var path: cstring
-  g_variant_get(captured, "(&s)", addr path)
-  let source = $path
-  g_variant_unref(captured)
+  let source = capture(index, area, 0, 0)
   let target = absolutePath(file.expandTilde)
   try:
     createDir(target.parentDir)
@@ -245,19 +263,6 @@ proc saveScreenshot(args: JsonNode): JsonNode =
   except OSError, IOError:
     raise newException(ToolError, "could not save " & target & ": " & getCurrentExceptionMsg())
   reply("Saved " & target & ".")
-
-proc wrapText(s: string, size, maxWidth: float): seq[string] =
-  ## Lines no wider than maxWidth, guessing ~0.52 em per character.
-  let columns = max(int(maxWidth / (size * 0.52)), 8)
-  for paragraph in s.split('\n'):
-    var line = ""
-    for word in strutils.splitWhitespace(paragraph):
-      if line.len > 0 and line.runeLen + 1 + word.runeLen > columns:
-        result.add(line)
-        line = word
-      else:
-        line = if line.len == 0: word else: line & " " & word
-    result.add(line)
 
 proc callout(args: JsonNode): JsonNode =
   ## A step's card: a short paragraph on a white card beside the target, with an arrow
@@ -268,12 +273,12 @@ proc callout(args: JsonNode): JsonNode =
   let (index, m) = pick(args)
   let (l, t, r, b) = box(args, "target")
   let size = number(args, "size", DefaultFont)
-  let accent = color(args)
+  let accent = if color(args).len > 0: color(args) else: Accent
   let step = int(number(args, "step", 0))
   let lines = wrapText(plain(body), size, number(args, "max_width", 320))
   let pad = 14.0
-  let w = float(lines.mapIt(it.runeLen).max) * size * 0.52 + 2 * pad
-  let h = float(lines.len) * size * 1.4 + 2 * pad
+  let w = float(lines.mapIt(it.runeLen).max) * size * CharWidth + 2 * pad
+  let h = float(lines.len) * size * LineSpacing + 2 * pad
   let gap = 48.0
   let (mw, mh) = m.modelSize
   let (cx, cy) = ((l + r) / 2, (t + b) / 2)
@@ -288,20 +293,141 @@ proc callout(args: JsonNode): JsonNode =
   # The arrow runs from the card's edge nearest the target to just short of the target.
   let tail = (clamp(cx, x, x + w), clamp(cy, y, y + h))
   let head = (clamp(tail[0], l - 6, r + 6), clamp(tail[1], t - 6, b + 6))
-  draw(index, "rectangle", points(%*{"points": [[x, y], [x + w, y + h]]}, m, 2, 2), "#ffffff",
-    1 / m.scale, true)
-  draw(index, "rectangle", points(%*{"points": [[x, y], [x + w, y + h]]}, m, 2, 2),
-    (if accent.len > 0: accent else: "#2563eb"), 2 / m.scale, false)
-  draw(index, "text", points(%*{"points": [[x + pad, y + pad]]}, m, 1, 1), "#1e293b",
-    size / m.scale, false, lines.join("\n"))
+  let card = [(x, y), (x + w, y + h)]
+  draw(index, m, "rectangle", card, "#ffffff", 1, filled = true)
+  draw(index, m, "rectangle", card, accent, 2)
+  draw(index, m, "text", [(x + pad, y + pad)], "#1e293b", size, label = lines.join("\n"))
   if hypot(head[0] - tail[0], head[1] - tail[1]) > 12:
-    draw(index, "arrow", points(%*{"points": [[tail[0], tail[1]], [head[0], head[1]]]}, m, 2, 2),
-      (if accent.len > 0: accent else: "#2563eb"), DefaultWidth / m.scale, false)
+    draw(index, m, "arrow", [tail, head], accent, DefaultWidth)
   if step > 0:
-    draw(index, "marker", points(%*{"points": [[x, y]]}, m, 1, 1),
-      (if accent.len > 0: accent else: "#2563eb"), 13 / m.scale, false, $step)
+    draw(index, m, "marker", [(x, y)], accent, 13, label = $step)
   reply("Callout drawn: card [" & $int(x) & ", " & $int(y) & ", " & $int(x + w) & ", " &
     $int(y + h) & "].")
+
+proc drawTool(args: JsonNode): JsonNode =
+  let kind = text(args, "kind")
+  if kind notin ["rectangle", "ellipse", "diamond", "arrow", "line", "highlighter", "pen"]:
+    raise newException(ToolError, "kind must be rectangle, ellipse, diamond, arrow, line, highlighter or pen")
+  let (index, m) = pick(args)
+  let pts = points(args, 2, (if kind == "pen": 10_000 else: 2))
+  let label = text(args, "label")
+  let closed = kind in ["rectangle", "ellipse", "diamond"]
+  if label.len > 0 and kind notin ["rectangle", "ellipse", "diamond", "arrow", "line"]:
+    raise newException(ToolError, "label is for shapes, arrows and lines; use add_text")
+  # Everything is checked before anything is drawn, so an error never leaves half a mark.
+  let (labelColor, labelSize) = (color(args, "label_color"), number(args, "size", DefaultFont))
+  let fill = color(args, "fill_color")
+  if fill.len > 0 and not closed:
+    raise newException(ToolError, "fill_color is for rectangle, ellipse and diamond")
+  if fill.len > 0:   # a card: the tinted inside first, the outline over its edge
+    draw(index, m, kind, pts, fill, 1, filled = true)
+  draw(index, m, kind, pts, color(args), number(args, "width", DefaultWidth), flag(args, "filled"))
+  if label.len > 0 and closed:   # Inkpane centres it in the shape's box
+    draw(index, m, "text", pts, labelColor, labelSize, label = label)
+  elif label.len > 0:
+    # Beside the middle of the arrow, clear of the line: above a level one (centred by
+    # Inkpane, which knows the text's width), to the right of a steep one.
+    let ((ax, ay), (bx, by)) = (pts[0], pts[1])
+    let (mx, my) = ((ax + bx) / 2, (ay + by) / 2)
+    let length = max(hypot(bx - ax, by - ay), 1)
+    let (dx, dy) = ((bx - ax) / length, (by - ay) / length)
+    let at =
+      if abs(dx) >= 0.5:
+        var (nx, ny) = (dy, -dx)   # the normal pointing up the screen
+        if ny > 0: (nx, ny) = (-nx, -ny)
+        let reach = labelSize * 0.75 + 6
+        let c = (mx + nx * reach, my + ny * reach)
+        @[c, c]
+      else:
+        @[(mx + 10, my - labelSize * 0.7)]
+    draw(index, m, "text", at, labelColor, labelSize, label = label)
+  reply("Drew " & kind & (if label.len > 0: " with its label" else: "") & " on monitor " &
+    $index & ".")
+
+proc circle(args: JsonNode): JsonNode =
+  ## An ellipse inside a box only touches the box's sides, so one drawn on a control's
+  ## own box cuts its corners: grow it by √2 (through the corners) plus a margin.
+  let (left, top, right, bottom) = box(args, "box")
+  let (cx, cy) = ((left + right) / 2, (top + bottom) / 2)
+  let rx = (right - left) / 2 * sqrt(2.0) + 4
+  let ry = (bottom - top) / 2 * sqrt(2.0) + 4
+  let (index, m) = pick(args)
+  draw(index, m, "ellipse", [(cx - rx, cy - ry), (cx + rx, cy + ry)], color(args),
+    number(args, "width", DefaultWidth))
+  result = reply("Circled [" & $int(left) & ", " & $int(top) & ", " & $int(right) & ", " &
+    $int(bottom) & "] on monitor " & $index & "; the ellipse spans [" & $int(cx - rx) & ", " &
+    $int(cy - ry) & ", " & $int(cx + rx) & ", " & $int(cy + ry) & "].")
+  let label = text(args, "label")
+  if label.len == 0:
+    return
+  # The label goes just outside the ellipse on the side asked for; its width is estimated.
+  let font = number(args, "size", DefaultFont)
+  let (w, h) = (float(label.runeLen) * font * CharWidth, font * LineSpacing)
+  let gap = 8.0
+  let (mw, mh) = m.modelSize
+  let side = text(args, "label_side", "right")
+  var (x, y) = case side
+    of "right": (cx + rx + gap, cy - h / 2)
+    of "left": (cx - rx - gap - w, cy - h / 2)
+    of "above": (cx - w / 2, cy - ry - gap - h)
+    of "below": (cx - w / 2, cy + ry + gap)
+    else: raise newException(ToolError, "label_side must be right, left, above or below")
+  x = clamp(x, 0, max(float(mw) - w, 0))
+  y = clamp(y, 0, max(float(mh) - h, 0))
+  # Above and below are centred by Inkpane, which knows the text's real width.
+  let at = if side in ["above", "below"]: @[(cx, y), (cx, y + h)] else: @[(x, y)]
+  draw(index, m, "text", at, color(args), font, label = label)
+  result = reply(result["content"][0]["text"].getStr & " Label at about [" & $int(x) & ", " &
+    $int(y) & ", " & $int(x + w) & ", " & $int(y + h) & "].")
+
+proc addText(args: JsonNode): JsonNode =
+  let label = text(args, "text")
+  if label.len == 0:
+    raise newException(ToolError, "text must not be empty")
+  let (index, m) = pick(args)
+  let (x, y) = (number(args, "x", 0), number(args, "y", 0))
+  let size = number(args, "size", DefaultFont)
+  let maxWidth = number(args, "max_width", 0)
+  let shown = if maxWidth > 0: wrapText(label, size, maxWidth).join("\n") else: label
+  # Two equal points: Inkpane centres the text on them.
+  let at = if flag(args, "centered"): @[(x, y), (x, y)] else: @[(x, y)]
+  draw(index, m, "text", at, color(args), size, label = shown)
+  let lineCount = shown.count('\n') + 1
+  reply("Added text on monitor " & $index & ": " & $lineCount &
+    (if lineCount == 1: " line" else: " lines") & ", about " &
+    $int(float(lineCount) * size * LineSpacing) & " px tall.")
+
+proc addStepMarker(args: JsonNode): JsonNode =
+  let (index, m) = pick(args)
+  let step = int(number(args, "number", 0))
+  draw(index, m, "marker", [(number(args, "x", 0), number(args, "y", 0))], color(args),
+    number(args, "size", DefaultRadius), label = (if step > 0: $step else: ""))
+  reply("Added a numbered step marker on monitor " & $index & ".")
+
+proc undoLast(args: JsonNode): JsonNode =
+  let r = call("UndoAi")
+  var removed: cint
+  g_variant_get(r, "(b)", addr removed)
+  g_variant_unref(r)
+  reply(if removed != 0: "Removed your most recent mark." else: "You have no marks to remove.")
+
+proc clear(args: JsonNode): JsonNode =
+  let scope = text(args, "scope", "ai")
+  if scope notin ["ai", "all"]:
+    raise newException(ToolError, "scope must be ai or all")
+  g_variant_unref(call("Clear", g_variant_new("(b)", cint(scope == "ai"))))
+  reply(if scope == "ai": "Removed your marks." else: "Removed all drawing, including the user's.")
+
+proc setBoard(args: JsonNode): JsonNode =
+  let board = text(args, "board")
+  if board notin ["none", "whiteboard", "blackboard"]:
+    raise newException(ToolError, "board must be none, whiteboard or blackboard")
+  g_variant_unref(call("SetBoard", g_variant_new("(s)", board.cstring)))
+  reply("Board: " & board & ".")
+
+proc close(args: JsonNode): JsonNode =
+  g_variant_unref(call("Hide"))
+  reply("Closed Inkpane's overlay and cleared all drawing.")
 
 ############################
 # Clicking and typing (only when the user allowed it)
@@ -398,6 +524,15 @@ proc scrollTool(args: JsonNode): JsonNode =
   session.scroll(steps)
   reply("Scrolled " & $steps & " notches.")
 
+proc pressCodes(codes: openArray[int]) =
+  ## A key combination as physical keys, paced: modifiers first, released in reverse.
+  for code in codes:
+    session.keycode(code, true)
+    sleep(15)
+  for i in countdown(codes.high, 0):
+    session.keycode(codes[i], false)
+    sleep(15)
+
 proc wlCopy(text: string, clear = false): bool =
   try:
     let process = startProcess("wl-copy", args = (if clear: @["--clear"] else: @["--type", "text/plain"]),
@@ -420,13 +555,7 @@ proc pasteText(s, keys: string): bool =
   if not wlCopy(s):
     return false
   sleep(80)
-  let codes = keys.split('+').mapIt(evdevCode(it.strip))
-  for code in codes:
-    session.keycode(code, true)
-    sleep(15)
-  for i in countdown(codes.high, 0):
-    session.keycode(codes[i], false)
-    sleep(15)
+  pressCodes(keys.split('+').mapIt(evdevCode(it.strip)))
   sleep(300)   # let the app read the clipboard before it changes back
   discard (if savedCode == 0: wlCopy(saved) else: wlCopy("", clear = true))
   true
@@ -463,160 +592,8 @@ proc pressKeys(args: JsonNode): JsonNode =
         "alt, enter, tab, esc, up, f5, or a single letter or digit)")
     codes.add(code)
   ensureSession()
-  for code in codes:
-    session.keycode(code, true)
-    sleep(15)
-  for i in countdown(codes.high, 0):
-    session.keycode(codes[i], false)
-    sleep(15)
+  pressCodes(codes)
   reply("Pressed " & combo & ".")
-
-proc drawTool(args: JsonNode): JsonNode =
-  let kind = text(args, "kind")
-  if kind notin ["rectangle", "ellipse", "diamond", "arrow", "line", "highlighter", "pen"]:
-    raise newException(ToolError, "kind must be rectangle, ellipse, diamond, arrow, line, highlighter or pen")
-  let (index, m) = pick(args)
-  let pts = points(args, m, 2, (if kind == "pen": 10_000 else: 2))
-  let label = text(args, "label")
-  let closed = kind in ["rectangle", "ellipse", "diamond"]
-  if label.len > 0 and kind notin ["rectangle", "ellipse", "diamond", "arrow", "line"]:
-    raise newException(ToolError, "label is for shapes, arrows and lines; use add_text")
-  # Everything is checked before anything is drawn, so an error never leaves half a mark.
-  let (labelColor, labelSize) = (color(args, "label_color"), number(args, "size", DefaultFont))
-  let fill = color(args, "fill_color")
-  if fill.len > 0 and not closed:
-    raise newException(ToolError, "fill_color is for rectangle, ellipse and diamond")
-  if fill.len > 0:   # a card: the tinted inside first, the outline over its edge
-    draw(index, kind, points(args, m, 2, 2), fill, 1, true)
-  draw(index, kind, pts, color(args), number(args, "width", DefaultWidth) / m.scale,
-    flag(args, "filled"))
-  if label.len > 0 and closed:   # Inkpane centres it in the shape's box
-    draw(index, "text", points(args, m, 2, 2), labelColor, labelSize / m.scale, false, label)
-  elif label.len > 0:
-    # Beside the middle of the arrow, clear of the line: above a level one (centred by
-    # Inkpane, which knows the text's width), to the right of a steep one.
-    let (a, b) = (args["points"][0], args["points"][1])
-    let (ax, ay, bx, by) = (a[0].getFloat, a[1].getFloat, b[0].getFloat, b[1].getFloat)
-    let (mx, my) = ((ax + bx) / 2, (ay + by) / 2)
-    let length = max(hypot(bx - ax, by - ay), 1)
-    let (dx, dy) = ((bx - ax) / length, (by - ay) / length)
-    let at =
-      if abs(dx) >= 0.5:
-        var (nx, ny) = (dy, -dx)   # the normal pointing up the screen
-        if ny > 0: (nx, ny) = (-nx, -ny)
-        let reach = labelSize * 0.75 + 6
-        let (cx, cy) = (mx + nx * reach, my + ny * reach)
-        %*{"points": [[cx, cy], [cx, cy]]}
-      else:
-        %*{"points": [[mx + 10, my - labelSize * 0.7]]}
-    draw(index, "text", points(at, m, 1, 2), labelColor, labelSize / m.scale, false, label)
-  reply("Drew " & kind & (if label.len > 0: " with its label" else: "") & " on monitor " &
-    $index & ".")
-
-proc circle(args: JsonNode): JsonNode =
-  ## An ellipse inside a box only touches the box's sides, so one drawn on a control's
-  ## own box cuts its corners: grow it by √2 (through the corners) plus a margin.
-  let box = if args.hasKey("box"): args["box"] else: newJNull()
-  if box.kind != JArray or box.len != 4 or box.anyIt(it.kind notin {JInt, JFloat}):
-    raise newException(ToolError, "box must be [left, top, right, bottom]")
-  let (left, top) = (min(box[0].getFloat, box[2].getFloat), min(box[1].getFloat, box[3].getFloat))
-  let (right, bottom) = (max(box[0].getFloat, box[2].getFloat), max(box[1].getFloat, box[3].getFloat))
-  let (cx, cy) = ((left + right) / 2, (top + bottom) / 2)
-  let rx = (right - left) / 2 * sqrt(2.0) + 4
-  let ry = (bottom - top) / 2 * sqrt(2.0) + 4
-  let (index, m) = pick(args)
-  let pts = points(%*{"points": [[cx - rx, cy - ry], [cx + rx, cy + ry]]}, m, 2, 2)
-  draw(index, "ellipse", pts, color(args), number(args, "width", DefaultWidth) / m.scale, false)
-  result = reply("Circled [" & $int(left) & ", " & $int(top) & ", " & $int(right) & ", " &
-    $int(bottom) & "] on monitor " & $index & "; the ellipse spans [" & $int(cx - rx) & ", " &
-    $int(cy - ry) & ", " & $int(cx + rx) & ", " & $int(cy + ry) & "].")
-  let label = text(args, "label")
-  if label.len == 0:
-    return
-  # The label goes just outside the ellipse on the side asked for. Its width is estimated
-  # (about 0.55 em per character); Inkpane's default text is 24 px on screen.
-  let font = number(args, "size", DefaultFont)
-  let (w, h) = (float(label.runeLen) * font * 0.55, font * 1.25)
-  let gap = 8.0
-  let (mw, mh) = m.modelSize
-  let side = text(args, "label_side", "right")
-  var (x, y) = case side
-    of "right": (cx + rx + gap, cy - h / 2)
-    of "left": (cx - rx - gap - w, cy - h / 2)
-    of "above": (cx - w / 2, cy - ry - gap - h)
-    of "below": (cx - w / 2, cy + ry + gap)
-    else: raise newException(ToolError, "label_side must be right, left, above or below")
-  x = clamp(x, 0, max(float(mw) - w, 0))
-  y = clamp(y, 0, max(float(mh) - h, 0))
-  # Above and below are centred by Inkpane, which knows the text's real width.
-  let at = if side in ["above", "below"]: %*{"points": [[cx, y], [cx, y + h]]}
-           else: %*{"points": [[x, y]]}
-  draw(index, "text", points(at, m, 1, 2), color(args), font / m.scale, false, label)
-  result = reply(result["content"][0]["text"].getStr & " Label at about [" & $int(x) & ", " &
-    $int(y) & ", " & $int(x + w) & ", " & $int(y + h) & "].")
-
-proc addText(args: JsonNode): JsonNode =
-  let label = text(args, "text")
-  if label.len == 0:
-    raise newException(ToolError, "text must not be empty")
-  let (index, m) = pick(args)
-  let (x, y) = (number(args, "x", 0), number(args, "y", 0))
-  let size = number(args, "size", DefaultFont)
-  let maxWidth = number(args, "max_width", 0)
-  var shown = label
-  if maxWidth > 0:   # wrap at word boundaries, guessing ~0.52 em per character
-    let columns = max(int(maxWidth / (size * 0.52)), 8)
-    var lines: seq[string]
-    for paragraph in shown.split('\n'):
-      var line = ""
-      for word in strutils.splitWhitespace(paragraph):
-        if line.len > 0 and line.runeLen + 1 + word.runeLen > columns:
-          lines.add(line)
-          line = word
-        else:
-          line = if line.len == 0: word else: line & " " & word
-      lines.add(line)
-    shown = lines.join("\n")
-  # Two equal points: Inkpane centres the text on them.
-  let at = if flag(args, "centered"): %*{"points": [[x, y], [x, y]]} else: %*{"points": [[x, y]]}
-  draw(index, "text", points(at, m, 1, 2), color(args), size / m.scale, false, shown)
-  let lineCount = shown.count('\n') + 1
-  reply("Added text on monitor " & $index & ": " & $lineCount &
-    (if lineCount == 1: " line" else: " lines") & ", about " & $int(float(lineCount) * size * 1.4) &
-    " px tall.")
-
-proc addStepMarker(args: JsonNode): JsonNode =
-  let (index, m) = pick(args)
-  let at = %*{"points": [[number(args, "x", 0), number(args, "y", 0)]]}
-  let step = int(number(args, "number", 0))
-  draw(index, "marker", points(at, m, 1, 1), color(args),
-    number(args, "size", DefaultRadius) / m.scale, false, (if step > 0: $step else: ""))
-  reply("Added a numbered step marker on monitor " & $index & ".")
-
-proc undoLast(args: JsonNode): JsonNode =
-  let r = call("UndoAi")
-  var removed: cint
-  g_variant_get(r, "(b)", addr removed)
-  g_variant_unref(r)
-  reply(if removed != 0: "Removed your most recent mark." else: "You have no marks to remove.")
-
-proc clear(args: JsonNode): JsonNode =
-  let scope = text(args, "scope", "ai")
-  if scope notin ["ai", "all"]:
-    raise newException(ToolError, "scope must be ai or all")
-  g_variant_unref(call("Clear", g_variant_new("(b)", cint(scope == "ai"))))
-  reply(if scope == "ai": "Removed your marks." else: "Removed all drawing, including the user's.")
-
-proc setBoard(args: JsonNode): JsonNode =
-  let board = text(args, "board")
-  if board notin ["none", "whiteboard", "blackboard"]:
-    raise newException(ToolError, "board must be none, whiteboard or blackboard")
-  g_variant_unref(call("SetBoard", g_variant_new("(s)", board.cstring)))
-  reply("Board: " & board & ".")
-
-proc close(args: JsonNode): JsonNode =
-  g_variant_unref(call("Hide"))
-  reply("Closed Inkpane's overlay and cleared all drawing.")
 
 ############################
 # Tool Schemas
@@ -672,8 +649,7 @@ proc toolList(): JsonNode =
       "monitor's latest screenshot, origin top-left. Shapes take 2 points: for rectangle, " &
       "ellipse and diamond the start and the opposite corner; for arrow and line the tail " &
       "and the head (the arrowhead lands on the target); highlighter takes start and end. " &
-      "pen takes 2 or more points. To circle something, use an ellipse whose corners lie a " &
-      "bit outside it (or use the circle tool, which does that for you).",
+      "pen takes 2 or more points. To circle a control, use the circle tool.",
       schema("", %*{
         "kind": {"type": "string", "enum": ["rectangle", "ellipse", "diamond", "arrow",
           "line", "highlighter", "pen"]},

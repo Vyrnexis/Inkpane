@@ -51,6 +51,13 @@ const
   Fillable* = {Rectangle, Diamond, Ellipse}
   Placed* = {Text, Marker}   # put down with a click instead of dragged
 
+proc toolNamed*(name: string): Tool =
+  ## "rectangle", "Marker" …, any case; ValueError for anything else.
+  for tool in Tool:
+    if cmpIgnoreCase($tool, name) == 0:
+      return tool
+  raise newException(ValueError, "unknown tool: " & name)
+
 proc distance(a, b: FPoint): float32 =
   hypot(a.x - b.x, a.y - b.y)
 

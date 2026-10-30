@@ -108,13 +108,7 @@ proc apply(settings: var Settings, file: Config) =
     for i, word in words:
       settings.presets[i] = clamp(parseFloat(word), 1, 64)
   read("pen", "tool"):
-    var found = false
-    for tool in Tool:
-      if cmpIgnoreCase($tool, raw) == 0:
-        settings.tool = tool
-        found = true
-    if not found:
-      raise newException(ValueError, "unknown tool: " & raw)
+    settings.tool = toolNamed(raw)
   read("pen", "fill"):
     settings.fill = parseBool(raw)
   read("toolbar", "visible"):

@@ -150,11 +150,11 @@ proc evdevCode*(name: string): int =
     else: discard
   -1
 
-proc key*(session: RemoteSession, keysym: int, down: bool) =
+proc key(session: RemoteSession, keysym: int, down: bool) =
   session.notify("NotifyKeyboardKeysym", g_variant_new("(oa{sv}iu)", session.handle.cstring,
     pointer(nil), int32(keysym), uint32(ord(down))))
 
-proc keysymFor*(rune: Rune): int =
+proc keysymFor(rune: Rune): int =
   ## Latin-1 characters are their own keysym; others are 0x1000000 + the code point.
   case int(rune)
   of 0x0a: 0xff0d   # newline: Return
@@ -163,10 +163,11 @@ proc keysymFor*(rune: Rune): int =
   else: 0x01000000 + int(rune)
 
 proc typeRune*(session: RemoteSession, rune: Rune) =
-  ## One character, paced like a fast typist. Sent back to back, KWin applied the Shift a
-  ## capital or a symbol needs to the next key instead ("Hello, you!" came out as
-  ## "hELLO< YOU1"); a short gap between events keeps them in order. Capitals are typed as
-  ## Shift + the small letter, and Shift is let go after every character in any case.
+  ## One character as a keysym: the fallback when text can't be pasted. KWin applies the
+  ## Shift a keysym needs to the next key ("Hello, you!" came out as "hELLO< YOU1"), so
+  ## capitals are typed as our own Shift + the small letter and Shift is let go after
+  ## every character. Letters, digits and spaces come out right; symbols that need Shift
+  ## may not.
   const ShiftL = 0xffe1
   const GapMs = 15
   let upper = int(rune) in ord('A') .. ord('Z')
