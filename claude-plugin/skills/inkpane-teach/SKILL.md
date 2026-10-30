@@ -81,6 +81,37 @@ off. So:
 - After drawing anything important, take a screenshot and look: if the mark is off,
   `undo_last` and draw it again. Don't apologise at length; just fix it.
 
+## Making a tutorial
+
+When the user asks you to *make a tutorial* (a guide others can follow later, e.g.
+"read AppGlider's user guide and make a tutorial for adding a GitHub repo"):
+
+1. **Research**: read the docs, the user guide or the code you're pointed at, so the
+   steps are right. Note the exact names of buttons and fields.
+2. **Plan**: list the steps (usually 4–8) in chat, with where the files will go
+   (default `./tutorial-<topic>/`), and ask the user to confirm. Ask them to open the
+   app at its starting screen, and mention that they can start a screen recorder
+   (Spectacle, OBS) now if they want a video: your marks will be in it.
+3. **Each step**, one at a time:
+   - `screenshot`, then find the control and the app window's edges.
+   - `callout` with the step number, one or two sentences (what to do and why), and a
+     `side` with empty space; add a `circle` around the control when it is small.
+   - `save_screenshot` to `step-NN.png`, with `region` set to the app's window plus a
+     small margin, so nothing else of the user's desktop is in the tutorial.
+   - Tell the user in chat what to do, and wait for "done" (or do it yourself if
+     clicking tools are available and the user allowed it).
+   - `screenshot` to check it worked, then `clear` before the next step.
+4. **Result**: after the last step, save a final screenshot of the finished state, then
+   write `tutorial.md` in the same folder: a title, one line on what it achieves, any
+   requirements, then for each step a heading ("2. Open the Updates page"), the
+   instruction as a sentence or two, and its image (`![Step 2](step-02.png)`), and a
+   short "Done" section. Use the app's own words for buttons, in bold.
+5. Offer extras only if wanted: a slideshow video of the images with ffmpeg, or an
+   HTML version.
+
+Callout text in a tutorial is written for the reader of the tutorial, not for the user
+in front of you: "Click **Updates** in the sidebar to see apps with new versions."
+
 ## Whiteboard explanations
 
 For ideas no app shows (how data flows, what a git branch is, how DNS resolves a name),

@@ -77,6 +77,8 @@ proc crop*(shot: string, desktop: openArray[Monitor], monitor: int, area: Rect,
   var source = Rect(x: cint(float(m.x - left + region.x) * factor),
                     y: cint(float(m.y - top + region.y) * factor),
                     w: cint(float(region.w) * factor), h: cint(float(region.h) * factor))
+  if source.x < 0: (source.w, source.x) = (source.w + source.x, 0'i32)   # area past the edge
+  if source.y < 0: (source.h, source.y) = (source.h + source.y, 0'i32)
   source.w = min(source.w, image.w - source.x)
   source.h = min(source.h, image.h - source.y)
   if source.w <= 0 or source.h <= 0:

@@ -224,8 +224,10 @@ proc addItem*(scene: var Scene, item: Item) =
   scene.redoStack.setLen(0)
 
 proc addMarker*(scene: var Scene, center: FPoint, radius: float32, color: FColor,
-    byAi = false) =
-  scene.addItem(Item(kind: Marker, color: color, width: radius * 2, text: $scene.nextMarker,
+    byAi = false, number = 0) =
+  ## Numbered from 1 on, or `number` when given (a tutorial's step 3 stays 3).
+  let shown = if number > 0: number else: scene.nextMarker
+  scene.addItem(Item(kind: Marker, color: color, width: radius * 2, text: $shown,
     points: @[FPoint(x: center.x - radius, y: center.y - radius),
               FPoint(x: center.x + radius, y: center.y + radius)], byAi: byAi))
 

@@ -81,6 +81,10 @@ const
     </method>
     <method name="Capture">
       <arg name="monitor" type="i" direction="in"/>
+      <arg name="x" type="i" direction="in"/>
+      <arg name="y" type="i" direction="in"/>
+      <arg name="areaWidth" type="i" direction="in"/>
+      <arg name="areaHeight" type="i" direction="in"/>
       <arg name="width" type="i" direction="in"/>
       <arg name="height" type="i" direction="in"/>
       <arg name="path" type="s" direction="out"/>
@@ -877,7 +881,10 @@ proc aiDraw(app: var App, parameters: GVariant) =
   let size = float32(width)
   case tool
   of Marker:
-    overlay.scene.addMarker(path[0], (if size > 0: size else: 15), ink, byAi = true)
+    let number = if ($text).len == 0: 0 else: parseInt($text)   # ValueError: refused
+    if number notin 0 .. 999:
+      raise newException(ValueError, "A step number goes from 1 to 999.")
+    overlay.scene.addMarker(path[0], (if size > 0: size else: 15), ink, byAi = true, number)
   of Text:
     let fontSize = if size > 0: size else: 24
     var at = path[0]
@@ -942,14 +949,17 @@ proc answer(app: var App, command: Command, parameters: GVariant): GVariant =
       app.setPassthrough(false)
     app.markAllDirty()
   of CmdCapture:
-    var monitor, width, height: int32
-    g_variant_get(parameters, "(iii)", addr monitor, addr width, addr height)
+    var monitor, x, y, w, h, width, height: int32
+    g_variant_get(parameters, "(iiiiiii)", addr monitor, addr x, addr y, addr w, addr h,
+      addr width, addr height)
     if monitor notin 0'i32 ..< int32(monitors().len):
       raise newException(ValueError, "No monitor " & $monitor)
     if width < 0 or height < 0 or width > 16384 or height > 16384:
       raise newException(ValueError, "Bad size " & $width & " × " & $height)
+    if w < 0 or h < 0:
+      raise newException(ValueError, "Bad area " & $w & " × " & $h)
     let path = runtimeDir() / "capture.png"
-    app.capture(monitor, Rect(), width, height, path)
+    app.capture(monitor, Rect(x: x, y: y, w: w, h: h), width, height, path)
     result = g_variant_new("(s)", path.cstring)
 
 ############################

@@ -164,8 +164,9 @@ proc points(args: JsonNode, m: Monitor, minCount, maxCount: int): GVariant =
 
 proc plain(s: string): string =
   ## Inkpane draws text in one font, and common ones (Noto Sans) have no arrows or ticks.
+  ## Markdown emphasis means nothing on screen either.
   s.multiReplace(("→", "->"), ("⇒", "=>"), ("←", "<-"), ("⇐", "<="), ("↔", "<->"),
-    ("✓", "OK"), ("✔", "OK"), ("✗", "X"), ("✘", "X"))
+    ("✓", "OK"), ("✔", "OK"), ("✗", "X"), ("✘", "X"), ("**", ""), ("`", ""))
 
 proc draw(monitor: int, kind: string, pts: GVariant, color: string, width: float,
     filled: bool, label = "") =
@@ -192,7 +193,8 @@ proc screenInfo(args: JsonNode): JsonNode =
 proc screenshot(args: JsonNode): JsonNode =
   let (index, m) = pick(args)
   let (w, h) = m.modelSize
-  let r = call("Capture", g_variant_new("(iii)", cint(index), cint(w), cint(h)), CaptureTimeoutMs)
+  let r = call("Capture", g_variant_new("(iiiiiii)", cint(index), cint(0), cint(0), cint(0), cint(0),
+    cint(w), cint(h)), CaptureTimeoutMs)
   var path: cstring
   g_variant_get(r, "(&s)", addr path)
   let file = $path
@@ -206,6 +208,97 @@ proc screenshot(args: JsonNode): JsonNode =
     {"type": "image", "data": encode(png), "mimeType": "image/png"},
     {"type": "text", "text": "Monitor " & $index & " (" & m.name & "), " & $w & "x" & $h &
       " px. Draw with these coordinates. Your own marks are visible in it; Inkpane's toolbar is hidden."}]}
+
+proc box(args: JsonNode, key: string): (float, float, float, float) =
+  ## [left, top, right, bottom], in either order.
+  let b = if args.hasKey(key): args[key] else: newJNull()
+  if b.kind != JArray or b.len != 4 or b.anyIt(it.kind notin {JInt, JFloat}):
+    raise newException(ToolError, key & " must be [left, top, right, bottom]")
+  (min(b[0].getFloat, b[2].getFloat), min(b[1].getFloat, b[3].getFloat),
+   max(b[0].getFloat, b[2].getFloat), max(b[1].getFloat, b[3].getFloat))
+
+proc saveScreenshot(args: JsonNode): JsonNode =
+  ## A tutorial image: the area at the screen's real resolution, with the marks on it.
+  let file = text(args, "file")
+  if file.len == 0 or not file.toLowerAscii.endsWith(".png"):
+    raise newException(ToolError, "file must be a path ending in .png")
+  let (index, m) = pick(args)
+  var area = (0, 0, 0, 0)
+  if args.hasKey("region"):
+    let (l, t, r, b) = box(args, "region")
+    area = (int(l / m.scale), int(t / m.scale), int((r - l) / m.scale), int((b - t) / m.scale))
+    if area[2] < 8 or area[3] < 8:
+      raise newException(ToolError, "region is too small")
+  let captured = call("Capture", g_variant_new("(iiiiiii)", cint(index), cint(area[0]),
+    cint(area[1]), cint(area[2]), cint(area[3]), cint(0), cint(0)), CaptureTimeoutMs)
+  var path: cstring
+  g_variant_get(captured, "(&s)", addr path)
+  let source = $path
+  g_variant_unref(captured)
+  let target = absolutePath(file.expandTilde)
+  try:
+    createDir(target.parentDir)
+    copyFile(source, target)
+  except OSError, IOError:
+    raise newException(ToolError, "could not save " & target & ": " & getCurrentExceptionMsg())
+  reply("Saved " & target & ".")
+
+proc wrapText(s: string, size, maxWidth: float): seq[string] =
+  ## Lines no wider than maxWidth, guessing ~0.52 em per character.
+  let columns = max(int(maxWidth / (size * 0.52)), 8)
+  for paragraph in s.split('\n'):
+    var line = ""
+    for word in strutils.splitWhitespace(paragraph):
+      if line.len > 0 and line.runeLen + 1 + word.runeLen > columns:
+        result.add(line)
+        line = word
+      else:
+        line = if line.len == 0: word else: line & " " & word
+    result.add(line)
+
+proc callout(args: JsonNode): JsonNode =
+  ## A step's card: a short paragraph on a white card beside the target, with an arrow
+  ## from the card to it and the step number on the card's corner.
+  let body = text(args, "text")
+  if body.len == 0:
+    raise newException(ToolError, "text must not be empty")
+  let (index, m) = pick(args)
+  let (l, t, r, b) = box(args, "target")
+  let size = number(args, "size", DefaultFont)
+  let accent = color(args)
+  let step = int(number(args, "step", 0))
+  let lines = wrapText(plain(body), size, number(args, "max_width", 320))
+  let pad = 14.0
+  let w = float(lines.mapIt(it.runeLen).max) * size * 0.52 + 2 * pad
+  let h = float(lines.len) * size * 1.4 + 2 * pad
+  let gap = 48.0
+  let (mw, mh) = m.modelSize
+  let (cx, cy) = ((l + r) / 2, (t + b) / 2)
+  var (x, y) = case text(args, "side", "right")
+    of "right": (r + gap, cy - h / 2)
+    of "left": (l - gap - w, cy - h / 2)
+    of "above": (cx - w / 2, t - gap - h)
+    of "below": (cx - w / 2, b + gap)
+    else: raise newException(ToolError, "side must be right, left, above or below")
+  x = clamp(x, 8, max(float(mw) - w - 8, 8))
+  y = clamp(y, 8, max(float(mh) - h - 8, 8))
+  # The arrow runs from the card's edge nearest the target to just short of the target.
+  let tail = (clamp(cx, x, x + w), clamp(cy, y, y + h))
+  let head = (clamp(tail[0], l - 6, r + 6), clamp(tail[1], t - 6, b + 6))
+  draw(index, "rectangle", points(%*{"points": [[x, y], [x + w, y + h]]}, m, 2, 2), "#ffffff",
+    1 / m.scale, true)
+  draw(index, "rectangle", points(%*{"points": [[x, y], [x + w, y + h]]}, m, 2, 2),
+    (if accent.len > 0: accent else: "#2563eb"), 2 / m.scale, false)
+  draw(index, "text", points(%*{"points": [[x + pad, y + pad]]}, m, 1, 1), "#1e293b",
+    size / m.scale, false, lines.join("\n"))
+  if hypot(head[0] - tail[0], head[1] - tail[1]) > 12:
+    draw(index, "arrow", points(%*{"points": [[tail[0], tail[1]], [head[0], head[1]]]}, m, 2, 2),
+      (if accent.len > 0: accent else: "#2563eb"), DefaultWidth / m.scale, false)
+  if step > 0:
+    draw(index, "marker", points(%*{"points": [[x, y]]}, m, 1, 1),
+      (if accent.len > 0: accent else: "#2563eb"), 13 / m.scale, false, $step)
+  reply("Callout drawn: card [" & $int(x) & ", " & $int(y) & ", " & $int(x + w) & ", " &
+    $int(y + h) & "].")
 
 proc drawTool(args: JsonNode): JsonNode =
   let kind = text(args, "kind")
@@ -324,8 +417,9 @@ proc addText(args: JsonNode): JsonNode =
 proc addStepMarker(args: JsonNode): JsonNode =
   let (index, m) = pick(args)
   let at = %*{"points": [[number(args, "x", 0), number(args, "y", 0)]]}
+  let step = int(number(args, "number", 0))
   draw(index, "marker", points(at, m, 1, 1), color(args),
-    number(args, "size", DefaultRadius) / m.scale, false)
+    number(args, "size", DefaultRadius) / m.scale, false, (if step > 0: $step else: ""))
   reply("Added a numbered step marker on monitor " & $index & ".")
 
 proc undoLast(args: JsonNode): JsonNode =
@@ -411,6 +505,29 @@ proc toolList(): JsonNode =
         "color": colorProp,
         "width": {"type": "number", "description": "Line width in screenshot pixels. Omit for the default."},
         "monitor": monitorProp}, @["box"])),
+    tool("callout", "A step card for walkthroughs and tutorials: a short paragraph (one or " &
+      "two sentences: what to do and why) on a white card beside the target, with an arrow " &
+      "to it and an optional step number on the card. Pick the side with empty space.",
+      schema("", %*{
+        "text": {"type": "string"},
+        "target": {"type": "array", "items": xy, "minItems": 4, "maxItems": 4,
+          "description": "[left, top, right, bottom] of the control the step is about."},
+        "side": {"type": "string", "enum": ["right", "left", "above", "below"],
+          "description": "Where the card goes, relative to the target. Default right."},
+        "step": {"type": "integer", "minimum": 1, "description": "Step number shown on the card's corner."},
+        "max_width": {"type": "number", "description": "Card text width in screenshot pixels. Default 320."},
+        "size": {"type": "number", "description": "Font size in screenshot pixels. Default 16."},
+        "color": {"type": "string", "description": "Accent for the card's border, arrow and number. Default blue."},
+        "monitor": monitorProp}, @["text", "target"])),
+    tool("save_screenshot", "Save an image of the screen, with your marks on it, at full " &
+      "resolution: for tutorials and documentation. Crop it to the app's window with " &
+      "`region` so nothing else on the user's desktop ends up in the file. Ask the user " &
+      "before saving screenshots to files.",
+      schema("", %*{
+        "file": {"type": "string", "description": "Where to save, ending in .png. Relative paths are from the current directory."},
+        "region": {"type": "array", "items": xy, "minItems": 4, "maxItems": 4,
+          "description": "[left, top, right, bottom] in screenshot pixels: usually the app's window. Omit for the whole monitor."},
+        "monitor": monitorProp}, @["file"])),
     tool("add_text", "Write a short label on the screen (2-4 words works best), next to " &
       "what it explains.",
       schema("", %*{"x": xy, "y": xy, "text": {"type": "string"}, "color": colorProp,
@@ -422,6 +539,7 @@ proc toolList(): JsonNode =
       "centred at x, y, to mark the order of steps.",
       schema("", %*{"x": xy, "y": xy, "color": colorProp,
         "size": {"type": "number", "description": "Radius in screenshot pixels. Default 11."},
+        "number": {"type": "integer", "minimum": 1, "description": "Show this number instead of the next one in order."},
         "monitor": monitorProp}, @["x", "y"])),
     tool("undo_last", "Remove the most recent mark you made.", schema("", %*{})),
     tool("clear", "Remove marks from the screen. \"ai\" (default) removes only the marks you " &
@@ -446,6 +564,8 @@ proc callTool(name: string, args: JsonNode): JsonNode =
       of "screenshot": screenshot
       of "draw": drawTool
       of "circle": circle
+      of "callout": callout
+      of "save_screenshot": saveScreenshot
       of "add_text": addText
       of "add_step_marker": addStepMarker
       of "undo_last": undoLast
