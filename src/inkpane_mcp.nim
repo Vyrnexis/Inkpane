@@ -921,7 +921,7 @@ proc handle(request: JsonNode) =
         params["protocolVersion"].kind == JString and params["protocolVersion"].getStr in Versions:
       version = params["protocolVersion"].getStr
     result = %*{"protocolVersion": version, "capabilities": {"tools": {}},
-      "serverInfo": {"name": "inkpane", "version": "0.2.1"}, "instructions": Instructions}
+      "serverInfo": {"name": "inkpane", "version": "0.3.0"}, "instructions": Instructions}
   of "ping":
     result = newJObject()
   of "tools/list":
