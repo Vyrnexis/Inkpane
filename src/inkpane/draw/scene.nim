@@ -371,3 +371,13 @@ proc clear*(scene: var Scene) =
   scene.flip(change)
   scene.undoStack.add(change)
   scene.redoStack.setLen(0)
+
+proc stash*(scene: var Scene): Scene =
+  ## What closing keeps: an empty scene whose one undo step brings the drawing back, so
+  ## Ctrl+Z after reopening undoes the close. With nothing on screen, what was removed
+  ## last is kept instead (a clear just before closing). The rest of the history goes.
+  scene.cancel()
+  if scene.items.len > 0:
+    result.undoStack.add(Change(count: scene.items.len, items: move(scene.items)))
+  elif scene.undoStack.len > 0 and not scene.undoStack[^1].present:
+    result.undoStack.add(scene.undoStack.pop())

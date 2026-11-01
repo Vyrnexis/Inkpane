@@ -29,7 +29,7 @@ through to show it working, press the key again and it is gone.
 | **Meta+Z** | Start drawing · from click-through: back to drawing · while drawing: close and clear |
 | 2–0 or R D O A L P T H E, N | Pick a tool (the toolbar shows them all) |
 | Shift+1–8 | Colour |
-| `[` `]` or wheel | Thinner / thicker |
+| `-` `+`, `[` `]` or wheel | Thinner / thicker |
 | F | Fill rectangles, diamonds and ellipses |
 | Shift / Ctrl while dragging | Square, snap to 15° / draw from the centre |
 | Right drag | Erase |
@@ -41,7 +41,7 @@ through to show it working, press the key again and it is gone.
 | Ctrl+S | Screenshot: drag an area, or click for the whole screen |
 | Tab | Hide or show the toolbar |
 | F1 | Every key, on screen |
-| Esc | Cancel the shape being drawn, or close and clear |
+| Esc | Cancel the shape being drawn, or close and clear (Ctrl+Z next time brings it back) |
 
 The [user guide](GUIDE.md) explains every tool, click-through, the boards, settings,
 scripting and troubleshooting.

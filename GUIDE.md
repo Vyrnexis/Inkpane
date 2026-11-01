@@ -39,7 +39,8 @@ Inkpane waits in the background with an icon in the system tray. It has three st
   underneath. See [Click-through](#click-through).
 
 Closing always clears: nothing stays on your screen afterwards, and there is nothing
-to save or tidy up.
+to save or tidy up. Closed by mistake? Start drawing again and press Ctrl+Z: the last
+drawing comes back.
 
 **Meta+Z** (the Windows/Super key and Z) is the main key. What it does depends on the state:
 
@@ -122,7 +123,7 @@ Both need SDL3_ttf, see [Troubleshooting](#text-tools-do-nothing).
 While typing, keys type rather than switching tools, so you can write "Press R" without
 picking the rectangle.
 
-The text size follows the width (`[` `]` or the mouse wheel): the default width gives
+The text size follows the width (`-` `+`, `[` `]` or the mouse wheel): the default width gives
 27 px text. Text has a thin halo, dark behind light colours and light behind dark ones,
 so it stays readable over any background.
 
@@ -136,7 +137,8 @@ follows the width.
 - **Colour**: Shift+1 to Shift+8, or the colour dots in the toolbar. The default
   palette is red, orange, yellow, green, blue, purple, white and black; you can change
   it in the [settings](#settings).
-- **Width**: `[` and `]`, the mouse wheel, or the three width buttons in the toolbar.
+- **Width**: `-` and `+`, `[` and `]`, the mouse wheel, or the three width buttons in
+  the toolbar. `[` and `]` are the two keys right of P, whatever your layout prints on them.
   It applies to the next thing you draw, not to what is already there.
 - **Fill** (F, or the shape button in the toolbar): rectangles, diamonds and ellipses
   are drawn solid instead of outlined. Useful to cover something you do not want on a
@@ -155,8 +157,8 @@ follows the width.
 | Esc | Clear everything and close |
 
 Erasing and clearing can be undone too: each item the eraser removes is one undo step,
-and Ctrl+Z after a clear brings the whole drawing back. Only closing (Esc, Meta+Z) is
-final.
+and Ctrl+Z after a clear brings the whole drawing back. Even closing (Esc, Meta+Z) can
+be undone: start drawing again and press Ctrl+Z to get the last drawing back.
 
 ## Click-through
 
@@ -301,8 +303,9 @@ The first `inkpane` you start stays running; running it again talks to that one:
 
 Starting Inkpane from the app menu while it is running also toggles drawing.
 
-On compositors without the global-shortcut portal (Sway, niri and others), bind
-`inkpane --toggle` to a key in the compositor's own config, for example in Sway:
+On compositors without the global-shortcut portal (Sway, niri and others), and on
+Hyprland, bind `inkpane --toggle` to a key in the compositor's own config, for example
+in Sway:
 
 ```
 bindsym $mod+z exec inkpane --toggle
@@ -312,6 +315,12 @@ or in niri's `binds { }` section:
 
 ```
 Mod+Z { spawn "inkpane" "--toggle"; }
+```
+
+or in Hyprland's `hyprland.conf`:
+
+```
+bind = SUPER, Z, exec, inkpane --toggle
 ```
 
 ## Tips for screen recordings

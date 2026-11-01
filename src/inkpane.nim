@@ -11,7 +11,7 @@ import inkpane/wayland/overlay
 #
 # Runs in the background with a tray icon. Meta+Z (GlobalShortcuts portal), a tray
 # click, or `inkpane --toggle` opens the overlay on every monitor; toggling again or Esc
-# closes it and clears the drawing. 1 / V switches to click-through: the drawing stays
+# closes it and clears the drawing (Ctrl+Z in the next session brings it back). 1 / V switches to click-through: the drawing stays
 # while apps get the mouse and keyboard, until the toolbar or the toggle brings it back.
 # Ctrl+S saves a screenshot with the drawing on it. AI clients draw and take screenshots
 # through the D-Bus methods below, by way of the inkpane-mcp server.
@@ -31,7 +31,7 @@ const
     ("1 / V", "Click-through: apps get mouse and keys"),
     ("Meta+Z", "Back to drawing, or close"),
     ("Shift+1–8", "Colour"),
-    ("[ ]  or wheel", "Thinner / thicker"),
+    ("- +  [ ]  or wheel", "Thinner / thicker"),
     ("F", "Fill rectangles, diamonds, ellipses"),
     ("Shift / Ctrl while dragging", "Square, snap 15° / from the centre"),
     ("Right drag", "Erase"),
@@ -41,7 +41,7 @@ const
     ("Ctrl+S", "Screenshot: drag an area, or click"),
     ("Tab", "Hide the toolbar"),
     ("F1", "This help"),
-    ("Esc", "Cancel a drag, else close and clear")]
+    ("Esc", "Cancel a drag, else close")]
   Boards = [   # background of each board; Transparent shows the desktop
     FColor(r: 0, g: 0, b: 0, a: 0),
     FColor(r: 0.98, g: 0.98, b: 0.97, a: 1),
@@ -141,6 +141,7 @@ type
     grab: FPoint             # pointer minus toolbarPlace when that drag started
     passthrough: bool    # click-through: only the toolbar still takes the pointer
     board: Board
+    closed: seq[ClosedDrawing]   # each monitor's last drawing, until the next session
     boardHint: bool      # the AI put the board up: say how to get back to the desktop
     drawingOn: Overlay   # overlay that owns the drag in progress (drawing or erasing)
     dragTool: Tool       # tool of that drag: the eraser for a right drag
@@ -161,6 +162,10 @@ type
     warnedNoText: bool
     running: bool
     shortcuts: ShortcutSession
+
+  ClosedDrawing = object
+    width, height: float32   # the monitor it was on
+    scene: Scene             # empty; Ctrl+Z brings the drawing back
 
   ActionError = object of CatchableError
 
@@ -597,6 +602,10 @@ proc keyFor(key: ToolKey, event: KeyboardEvent): bool =
     else: ord(SCANCODE_1) + key.digit - 1
   ord(event.scancode) == digit or event.key == Keycode(ord(key.letter.toLowerAscii))
 
+proc changeWidth(app: var App, step: float32) =
+  app.width = clamp(app.width + step, MinWidth, MaxWidth)
+  app.markAllDirty()
+
 proc handleKey(app: var App, event: KeyboardEvent) =
   if app.typingOn != nil:
     app.typingKey(event)
@@ -665,14 +674,14 @@ proc handleKey(app: var App, event: KeyboardEvent) =
   of SDLK_Y:
     if ctrl and target != nil:
       target.dirty = target.scene.redo() or target.dirty
-  of SDLK_LEFTBRACKET:
-    app.width = max(MinWidth, app.width - WidthStep)
-    app.markAllDirty()
-  of SDLK_RIGHTBRACKET:
-    app.width = min(MaxWidth, app.width + WidthStep)
-    app.markAllDirty()
+  of SDLK_MINUS, SDLK_KP_MINUS:
+    app.changeWidth(-WidthStep)
+  of SDLK_PLUS, SDLK_EQUALS, SDLK_KP_PLUS:
+    app.changeWidth(WidthStep)
   else:
-    discard
+    # [ and ] by position, as on a US keyboard: elsewhere they need AltGr or are missing.
+    if event.scancode == SCANCODE_LEFTBRACKET: app.changeWidth(-WidthStep)
+    elif event.scancode == SCANCODE_RIGHTBRACKET: app.changeWidth(WidthStep)
 
 proc handleEvent(app: var App, event: Event) =
   case event.`type`
@@ -765,9 +774,7 @@ proc handleEvent(app: var App, event: Event) =
   of EVENT_MOUSE_WHEEL:
     if event.wheel.y == 0:
       return   # horizontal scroll
-    let step = if event.wheel.y > 0: WidthStep else: -WidthStep
-    app.width = clamp(app.width + step, MinWidth, MaxWidth)
-    app.markAllDirty()
+    app.changeWidth(if event.wheel.y > 0: WidthStep else: -WidthStep)
   of EVENT_WINDOW_MOUSE_LEAVE:
     let overlay = app.overlayFor(event.window.windowID)
     if overlay != nil:
@@ -796,11 +803,20 @@ proc showOverlays(app: var App) =
   except OverlayError:
     notifyError(getCurrentExceptionMsg())
     return
+  # Ctrl+Z on a fresh session undoes the close, as long as the monitors are the same.
+  if app.closed.len == app.overlays.len:
+    for i, overlay in app.overlays:
+      if app.closed[i].width == overlay.width and app.closed[i].height == overlay.height:
+        overlay.scene = move(app.closed[i].scene)
+  app.closed.setLen(0)
   setTrayDrawing(true)
 
 proc hideOverlays(app: var App) =
-  # Closing the overlay also discards the drawing: nothing lingers on screen.
+  # Closing takes the drawing off screen, but keeps it for one Ctrl+Z in the next session.
+  app.closed.setLen(0)
   for overlay in app.overlays:
+    app.closed.add(ClosedDrawing(width: overlay.width, height: overlay.height,
+      scene: overlay.scene.stash()))
     overlay.close()
   app.overlays.setLen(0)
   app.drawingOn = nil

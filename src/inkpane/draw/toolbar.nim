@@ -143,7 +143,7 @@ proc label*(toolbar: Toolbar, button: Button): string =
     ToolNames[key.tool] & "   " & $key.letter & (if key.digit >= 0: " · " & $key.digit else: "")
   of FillButton: "Fill shapes   F"
   of ColorButton: "Colour   Shift+" & $(button.index + 1)
-  of WidthButton: "Width " & formatFloat(toolbar.presets[button.index], precision = -1) & "   [ ]"
+  of WidthButton: "Width " & formatFloat(toolbar.presets[button.index], precision = -1) & "   - +"
   of CaptureButton: "Screenshot   Ctrl+S"
 
 proc tooltipAnchor*(button: Button): FPoint =
