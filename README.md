@@ -24,6 +24,10 @@ through to show it working, press the key again and it is gone.
 
 ## Quick start
 
+New to it? **Take the tour**: pick *Take the Tour* in the tray icon's menu, or run
+`inkpane --tour`. On the whiteboard it walks you through every tool and key, one step at
+a time, moving on as you do each one. It takes a few minutes.
+
 | Key | |
 |---|---|
 | **Meta+Z** | Start drawing · from click-through: back to drawing · while drawing: close and clear |

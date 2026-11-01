@@ -20,7 +20,8 @@ const
   MenuToggleId = 1'i32
   MenuSeparatorId = 2'i32
   MenuQuitId = 3'i32
-  MenuIds = [MenuToggleId, MenuSeparatorId, MenuQuitId]
+  MenuTourId = 4'i32
+  MenuIds = [MenuToggleId, MenuTourId, MenuSeparatorId, MenuQuitId]
 
   ItemXml = """
 <node>
@@ -112,6 +113,7 @@ type
   TrayAction* = enum
     TrayToggle      # left click: same as the shortcut
     TrayStartStop   # menu item: does what its label says (Start / Stop Drawing)
+    TrayTour
     TrayQuit
 
   Tray = object
@@ -184,6 +186,9 @@ proc menuItemProperties(id: int32): GVariant =
   of MenuToggleId:
     put("label", g_variant_new_string((if tray.drawing: "Stop Drawing" else: "Start Drawing").cstring))
     put("icon-name", g_variant_new_string((if tray.drawing: "process-stop" else: "draw-freehand").cstring))
+  of MenuTourId:
+    put("label", g_variant_new_string("Take the Tour"))
+    put("icon-name", g_variant_new_string("help-contents"))
   of MenuSeparatorId:
     put("type", g_variant_new_string("separator"))
   of MenuQuitId:
@@ -247,6 +252,7 @@ proc menuMethod(methodName: string, parameters: GVariant, invocation: pointer) =
     if $eventId == "clicked":
       case id
       of MenuToggleId: tray.actions.add(TrayStartStop)
+      of MenuTourId: tray.actions.add(TrayTour)
       of MenuQuitId: tray.actions.add(TrayQuit)
       else: discard
     reply(invocation)

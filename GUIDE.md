@@ -4,6 +4,7 @@ Everything Inkpane does, and how to get the most out of it. For installation see
 [README](README.md).
 
 - [The basics](#the-basics)
+- [The tour](#the-tour)
 - [Drawing tools](#drawing-tools)
 - [Text and step markers](#text-and-step-markers)
 - [Colour, width and fill](#colour-width-and-fill)
@@ -29,7 +30,7 @@ Inkpane waits in the background with an icon in the system tray. It has three st
    ▲                │  ▲                              │
    │   Meta+Z or    │  │  Meta+Z, or click a tool     │
    └──── Esc ───────┘  └──── in the toolbar ──────────┘
-   (clears everything)
+   (clears everything; Ctrl+Z next time brings it back)
 ```
 
 - **Closed**: nothing on screen, nothing intercepted.
@@ -59,7 +60,23 @@ System Settings → Shortcuts → Inkpane.
 
 **Esc** closes and clears from drawing mode (in click-through, Esc goes to the app you
 are using, like any other key). In the middle of a drag, Esc only drops the shape or
-stroke you are drawing.
+stroke you are drawing. Pressed Esc too soon? Start drawing again and press Ctrl+Z.
+
+## The tour
+
+The quickest way to learn the keys is to press them. *Take the Tour* in the tray icon's
+menu (or `inkpane --tour`) opens the whiteboard and shows one step at a time at the
+bottom of the screen: a key, and what to do with it. Do it and the next step appears.
+
+It goes through every tool, colour, width and fill, erasing and undo, clearing, the
+boards, hiding the toolbar, a screenshot of what you drew, and closing and reopening. You end up with a small
+drawing of your own, saved in your screenshot folder.
+
+- **→** skips a step (useful if, say, screenshots do not work on your desktop), **←**
+  goes back to the previous one.
+- **Esc** ends the tour, except at the step that asks you to close and reopen.
+- Click-through is not part of it, since there is nothing to click on the whiteboard.
+  Try 1 or V over a real app afterwards.
 
 ## Drawing tools
 
@@ -299,6 +316,7 @@ The first `inkpane` you start stays running; running it again talks to that one:
 | `inkpane --toggle` | Same as Meta+Z |
 | `inkpane --on` | Start drawing (or back to drawing from click-through) |
 | `inkpane --off` | Close and clear |
+| `inkpane --tour` | Start the [tour](#the-tour) |
 | `inkpane --quit` | Quit Inkpane |
 
 Starting Inkpane from the app menu while it is running also toggles drawing.

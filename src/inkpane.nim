@@ -2,7 +2,7 @@ import std/[math, os, parseopt, posix, strutils, tables]
 
 import sdl3
 
-import inkpane/[capture, config]
+import inkpane/[capture, config, tour]
 import inkpane/desktop/[dbus, glib, portal, tray]
 import inkpane/draw/[render, scene, text, toolbar]
 import inkpane/wayland/overlay
@@ -23,6 +23,7 @@ const
   ToolbarClearance = 24'f32   # a drag this close to the toolbar hides it
   TooltipDelayMs = 600'u64
   TooltipSize = 14'f32
+  TourSize = 22'f32       # the tour's step, read from a distance while drawing
   HelpSize = 16'f32
   TextColor = FColor(r: 0.93, g: 0.93, b: 0.95, a: 1)
   HelpKeys = [
@@ -58,6 +59,7 @@ const
     <method name="Show"/>
     <method name="Hide"/>
     <method name="Quit"/>
+    <method name="Tour"/>
     <method name="Status">
       <arg name="open" type="b" direction="out"/>
       <arg name="clickThrough" type="b" direction="out"/>
@@ -111,6 +113,7 @@ type
     CmdShow = "Show"
     CmdHide = "Hide"
     CmdQuit = "Quit"
+    CmdTour = "Tour"
     CmdStatus = "Status"
     CmdMonitors = "Monitors"
     CmdDraw = "Draw"
@@ -159,6 +162,8 @@ type
     selectFrom, selectTo: FPoint
     capturing: bool      # a clean frame for a screenshot: none of Inkpane's own UI
     aiGroups: int        # Draw and DrawMany calls so far: each one's items share a group
+    tour: Tour
+    undos, screenshots, closes: int   # counted for the tour
     warnedNoText: bool
     running: bool
     shortcuts: ShortcutSession
@@ -272,19 +277,20 @@ proc drawTexts(overlay: Overlay, background: FColor) =
       item.shown(background))
     renderer.draw(caret)
 
-proc drawChip(overlay: Overlay, text: string, at: FPoint) =
+proc drawChip(overlay: Overlay, text: string, at: FPoint, textSize = TooltipSize) =
   ## A line of text on a dark panel (tooltips and hints); `at` is the text's top-left.
-  let size = measureText(text, TooltipSize)
-  overlay.renderer.drawBackdrop(FRect(x: at.x - 8, y: at.y - 4, w: size.x + 16, h: size.y + 8),
-    overlay.mesh.pixelSize)
-  discard overlay.renderer.drawText(overlay.texts, text, at, TooltipSize, TextColor, false,
+  let size = measureText(text, textSize)
+  let pad = round(textSize * 0.57)   # 8 × 4 px around tooltip text
+  overlay.renderer.drawBackdrop(FRect(x: at.x - pad, y: at.y - pad / 2, w: size.x + 2 * pad,
+    h: size.y + pad), overlay.mesh.pixelSize)
+  discard overlay.renderer.drawText(overlay.texts, text, at, textSize, TextColor, false,
     overlay.scale)
 
-proc drawBottomChip(overlay: Overlay, text: string, margin: float32) =
+proc drawBottomChip(overlay: Overlay, text: string, margin: float32, textSize = TooltipSize) =
   ## A hint centred near the bottom of the screen.
-  let size = measureText(text, TooltipSize)
+  let size = measureText(text, textSize)
   overlay.drawChip(text, FPoint(x: round((overlay.width - size.x) / 2),
-    y: overlay.height - size.y - margin))
+    y: overlay.height - size.y - margin), textSize)
 
 proc drawTooltip(app: App, overlay: Overlay) =
   let button = overlay.toolbar.buttons[app.hoverButton]
@@ -377,7 +383,9 @@ proc render(app: App, overlay: Overlay) =
     renderer.draw(overlay.toolbar)
   if app.selecting and not app.capturing:
     app.drawSelection(overlay)
-  if app.boardHint and not app.capturing and textAvailable():
+  if app.tour.active and not app.capturing and textAvailable():
+    overlay.drawBottomChip(app.tour.hint, 40, TourSize)
+  elif app.boardHint and not app.capturing and textAvailable():
     let key = if app.board == Whiteboard: "Ctrl+W" else: "Ctrl+B"
     overlay.drawBottomChip(key & "  back to your desktop     Esc  close", 28)
   let overToolbar = toolbarShown and overlay.pointer in overlay.toolbar.bounds
@@ -550,6 +558,7 @@ proc screenshot(app: var App, overlay: Overlay, area: Rect) =
   except CatchableError:
     notifyError("Screenshot failed: " & getCurrentExceptionMsg())
     return
+  inc app.screenshots
   let shown = if path.startsWith(getHomeDir()): "~/" & path.relativePath(getHomeDir()) else: path
   notify("Screenshot saved to " & shown &
     (if copyToClipboard(path): " and copied to the clipboard." else: "."))
@@ -602,6 +611,17 @@ proc keyFor(key: ToolKey, event: KeyboardEvent): bool =
     else: ord(SCANCODE_1) + key.digit - 1
   ord(event.scancode) == digit or event.key == Keycode(ord(key.letter.toLowerAscii))
 
+proc tourView(app: App): TourView =
+  result = TourView(color: app.settings.palette.find(app.color), width: app.width,
+    board: ord(app.board), undos: app.undos, screenshots: app.screenshots, closes: app.closes,
+    open: app.overlays.len > 0, toolbar: not app.hideToolbar)
+  for overlay in app.overlays:
+    for i in 0 ..< overlay.scene.items.len - ord(overlay.scene.drawing):
+      let item = overlay.scene.items[i].addr
+      inc result.counts[item.kind]
+      inc result.items
+      if item.filled: inc result.filled
+
 proc changeWidth(app: var App, step: float32) =
   app.width = clamp(app.width + step, MinWidth, MaxWidth)
   app.markAllDirty()
@@ -642,6 +662,10 @@ proc handleKey(app: var App, event: KeyboardEvent) =
       app.markAllDirty()
     else:
       pendingCommands.add(CmdHide)
+  of SDLK_RIGHT, SDLK_LEFT:
+    if app.tour.active:
+      app.tour.skip((if event.key == SDLK_RIGHT: 1 else: -1), app.tourView)
+      app.markAllDirty()
   of SDLK_F1:
     if not app.textMissing:
       app.help = not app.help
@@ -662,6 +686,7 @@ proc handleKey(app: var App, event: KeyboardEvent) =
     if ctrl and target != nil:
       let changed = if shift: target.scene.redo() else: target.scene.undo()
       target.dirty = target.dirty or changed
+      if changed and not shift: inc app.undos
   of SDLK_S:
     if ctrl and app.drawingOn == nil:
       app.startSelecting(not app.selecting)
@@ -803,6 +828,8 @@ proc showOverlays(app: var App) =
   except OverlayError:
     notifyError(getCurrentExceptionMsg())
     return
+  if app.tour.active:
+    app.board = Whiteboard
   # Ctrl+Z on a fresh session undoes the close, as long as the monitors are the same.
   if app.closed.len == app.overlays.len:
     for i, overlay in app.overlays:
@@ -813,6 +840,10 @@ proc showOverlays(app: var App) =
 
 proc hideOverlays(app: var App) =
   # Closing takes the drawing off screen, but keeps it for one Ctrl+Z in the next session.
+  if not app.drawing:
+    return
+  inc app.closes
+  app.tour.active = app.tour.keepsOnClose
   app.closed.setLen(0)
   for overlay in app.overlays:
     app.closed.add(ClosedDrawing(width: overlay.width, height: overlay.height,
@@ -832,6 +863,21 @@ proc hideOverlays(app: var App) =
   app.selectOn = nil
   setTrayDrawing(false)
 
+proc startTour(app: var App) =
+  ## Opens on the whiteboard with the first step at the bottom.
+  if app.textMissing:   # the steps are text
+    return
+  app.showOverlays()
+  if not app.drawing:
+    return
+  if app.passthrough:
+    app.setPassthrough(false)
+  app.board = Whiteboard
+  app.boardHint = false
+  app.help = false
+  app.tour.begin(app.tourView)
+  app.markAllDirty()
+
 proc runCommand(app: var App, command: Command) =
   case command
   of CmdToggle:
@@ -842,6 +888,7 @@ proc runCommand(app: var App, command: Command) =
     if app.passthrough: app.setPassthrough(false) else: app.showOverlays()
   of CmdHide: app.hideOverlays()
   of CmdQuit: app.running = false
+  of CmdTour: app.startTour()
   of CmdNone, CmdStatus .. CmdCapture: discard   # D-Bus calls with arguments: answer()
 
 ############################
@@ -954,7 +1001,7 @@ proc aiUndo(app: var App): bool =
 proc answer(app: var App, command: Command, parameters: GVariant): GVariant =
   ## Runs a call to our D-Bus service; the result is its reply.
   case command
-  of CmdNone, CmdToggle .. CmdQuit:
+  of CmdNone, CmdToggle .. CmdTour:
     app.runCommand(command)
   of CmdStatus:
     # For inkpane-mcp before it clicks for the AI: a click must reach the app below,
@@ -1096,6 +1143,7 @@ proc collectCommands(app: var App) =
     pendingCommands.add(case action
       of TrayToggle: CmdToggle
       of TrayStartStop: (if app.drawing: CmdHide else: CmdShow)
+      of TrayTour: CmdTour
       of TrayQuit: CmdQuit)
   for shortcutId in app.shortcuts.takeActivated():
     if shortcutId == ToggleShortcutId:
@@ -1144,6 +1192,7 @@ the options control it; plain `inkpane` then toggles drawing.
   --toggle   start or stop drawing
   --on       start drawing
   --off      stop drawing and clear
+  --tour     learn the keys: a short guided tour on the whiteboard
   --quit     quit the running instance"""
 
 proc run(): int =
@@ -1154,6 +1203,7 @@ proc run(): int =
       of "toggle": command = CmdToggle
       of "on": command = CmdShow
       of "off": command = CmdHide
+      of "tour": command = CmdTour
       of "quit": command = CmdQuit
       of "h", "help":
         usage()
@@ -1194,6 +1244,8 @@ proc run(): int =
   app.bindToggleShortcut()
   if command in {CmdShow, CmdToggle}:
     app.showOverlays()
+  elif command == CmdTour:
+    app.startTour()
 
   # With no overlay there is no SDL window, and SDL can then only busy-poll for events.
   # So while idle, sleep in GLib instead: D-Bus, the Wayland socket and quit signals wake it.
@@ -1211,6 +1263,8 @@ proc run(): int =
     while pollEvent(event):
       app.handleEvent(event)
     app.collectCommands()
+    if app.tour.active and app.tour.update(app.tourView):
+      app.markAllDirty()
     app.updateTooltip()
     app.updateCursor()
     for overlay in app.overlays:
