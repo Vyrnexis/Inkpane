@@ -53,7 +53,7 @@ drawing comes back.
 
 A **left click on the tray icon** and `inkpane --toggle` do exactly the same. The tray
 icon's **right-click menu** has *Start Drawing* / *Stop Drawing*, which always do what
-they say, and *Quit Inkpane*.
+they say, *Take the Tour* (see [the tour](#the-tour)) and *Quit Inkpane*.
 
 The first time, KDE asks you to confirm the shortcut. To use another key, change it in
 System Settings → Shortcuts → Inkpane.
@@ -395,7 +395,7 @@ Sway, niri, COSMIC and others. GNOME and X11 sessions do not have it yet.
 
 The tray uses the StatusNotifierItem standard. KDE shows it out of the box; on Sway or
 Hyprland you need a bar with a tray, such as Waybar. Inkpane works without a tray
-anyway: use Meta+Z or `inkpane --toggle`.
+anyway: use Meta+Z or `inkpane --toggle`, and `inkpane --tour` for the tour.
 
 ### Where are the error messages?
 
