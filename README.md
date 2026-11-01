@@ -65,6 +65,22 @@ package builds the latest version:
 yay -S inkpane-git             # or paru, or any AUR helper
 ```
 
+**NixOS (flake):** try it with `nix run github:Vyrnexis/Inkpane`, or install it so the
+desktop finds its launcher (needed for the Meta+Z shortcut):
+
+```nix
+# flake.nix inputs
+inkpane.url = "github:Vyrnexis/Inkpane";
+inkpane.inputs.nixpkgs.follows = "nixpkgs";
+
+# configuration.nix, or home.packages in Home Manager
+environment.systemPackages = [ inputs.inkpane.packages.${pkgs.stdenv.hostPlatform.system}.default ];
+```
+
+The flake builds its own Wayland-only SDL3, without audio, X11 and zenity, so it adds
+about 100 MB with its dependencies instead of 1 GB. That takes a minute or two the first
+time, as no binary cache has it.
+
 **Any other distribution:** download `inkpane-<version>-x86_64-linux.tar.gz` from the
 [releases page](https://github.com/Vyrnexis/Inkpane/releases), then:
 
